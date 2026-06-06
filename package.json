@@ -10,9 +10,17 @@
   "build": {
     "appId": "com.mybudget.app",
     "productName": "My Budget",
-    "mac": { "category": "public.app-category.finance", "icon": "assets/icon.icns" },
-    "directories": { "output": "dist" },
-    "files": ["**/*", "!dist/**"]
+    "mac": {
+      "category": "public.app-category.finance",
+      "icon": "assets/icon.icns"
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!dist/**"
+    ]
   },
   "dependencies": {
     "exceljs": "^4.4.0"
@@ -20,5 +28,6 @@
   "devDependencies": {
     "electron": "^28.0.0",
     "electron-builder": "^24.13.3"
-  }
+  },
+  "author": "elenaliberti"
 }
