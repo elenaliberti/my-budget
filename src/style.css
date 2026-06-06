@@ -425,6 +425,28 @@ canvas.chart { display: block; }
 .location-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 4px 10px; background: var(--blue-light); color: #1d4ed8; border-radius: 20px; cursor: pointer; transition: all 0.12s; }
 .location-badge:hover { background: #3b82f6; color: white; }
 
+/* ── Month navigation ── */
+.month-nav { display: flex; align-items: center; gap: 6px; }
+.month-nav-btn { background: var(--surface); border: 1.5px solid var(--border); border-radius: 8px; width: 30px; height: 30px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; transition: all 0.12s; color: var(--text); }
+.month-nav-btn:hover:not(:disabled) { border-color: var(--emerald); color: var(--emerald); }
+.month-nav-btn:disabled { opacity: 0.3; cursor: default; }
+.month-nav-label { font-size: 14px; font-weight: 600; color: var(--text-muted); min-width: 110px; text-align: center; }
+.month-nav-today { padding: 4px 10px; border-radius: 20px; border: 1.5px solid var(--emerald); background: var(--emerald-light); color: var(--emerald-dark); font-size: 11px; font-weight: 700; cursor: pointer; font-family: var(--font); transition: all 0.12s; }
+.month-nav-today:hover { background: var(--emerald); color: white; }
+
+/* ── Monthly history table ── */
+.history-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.history-table th { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 6px 12px; border-bottom: 2px solid var(--border); text-align: left; }
+.history-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); }
+.history-table tr:last-child td { border-bottom: none; }
+.history-table tr:hover td { background: var(--bg); }
+.history-row-active td { background: var(--emerald-light) !important; }
+.history-row-active td strong { color: var(--emerald-dark); }
+.badge-now { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 20px; background: var(--emerald); color: white; vertical-align: middle; margin-left: 4px; }
+
+/* ── Currency badge ── */
+.cur-badge { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: var(--amber-light); color: #92400e; border: 1px solid #fde68a; }
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
