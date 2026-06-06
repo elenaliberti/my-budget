@@ -92,10 +92,10 @@ function updateSidebar() {
 function renderSetupPrompt() {
   return `
     <div class="setup-prompt">
-      <div class="sp-icon">💸</div>
-      <div class="sp-title">Let's set up your budget</div>
-      <div class="sp-sub">Enter your monthly take-home salary and we'll help you allocate it smartly across all spending categories — with predictions and insights every month.</div>
-      <button id="go-setup-btn" class="btn btn-primary" style="font-size:15px;padding:12px 32px;">Get Started →</button>
+      <div class="sp-icon">✨</div>
+      <div class="sp-title">Hey! Let's set up your budget 🎉</div>
+      <div class="sp-sub">No stress — just tell me your monthly take-home and we'll figure out the rest together. Budgeting can actually feel good, I promise.</div>
+      <button id="go-setup-btn" class="btn btn-primary" style="font-size:15px;padding:13px 36px;">Let's go! →</button>
     </div>`
 }
 
@@ -159,32 +159,32 @@ function renderDashboard() {
     </div>
 
     <div class="stats-row">
-      <div class="stat-card">
-        <div class="stat-icon">💼</div>
+      <div class="stat-card sc-income">
+        <div class="stat-icon">💰</div>
         <div class="stat-val">${cs(salary, profCur())}</div>
         <div class="stat-lbl">Monthly Income</div>
-        <div class="stat-delta neu">Net take-home</div>
+        <div class="stat-delta neu">Your take-home ✨</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-icon">💳</div>
+      <div class="stat-card sc-spent">
+        <div class="stat-icon">🧾</div>
         <div class="stat-val ${primaryTotal(totCur) > salary ? 'text-red' : ''}">${isMixed ? formatMixedTotal(totCur) : cs(primaryTotal(totCur), profCur())}</div>
-        <div class="stat-lbl">Spent${!isCurrentMonth ? ' ('+monthLabel(cur)+')' : ' This Month'}</div>
+        <div class="stat-lbl">Spent${!isCurrentMonth ? ' — '+monthLabel(cur) : ' This Month'}</div>
         <div class="stat-delta ${spendDelta === null ? 'neu' : primaryTotal(totCur) > totalPrevPrimary ? 'neg' : 'pos'}">
-          ${spendDelta !== null ? (primaryTotal(totCur) > totalPrevPrimary ? '↑' : '↓') + Math.abs(spendDelta) + '% vs prior month' : 'No prior data'}
+          ${spendDelta !== null ? (primaryTotal(totCur) > totalPrevPrimary ? '↑' : '↓') + Math.abs(spendDelta) + '% vs last month' : 'First month — you got this!'}
         </div>
       </div>
-      <div class="stat-card">
-        <div class="stat-icon">${remaining >= 0 ? '✅' : '🚨'}</div>
+      <div class="stat-card sc-remain">
+        <div class="stat-icon">${remaining >= 0 ? '🎯' : '😬'}</div>
         <div class="stat-val ${remaining < 0 ? 'text-red' : 'text-emerald'}">${cs(Math.abs(remaining), profCur())}</div>
-        <div class="stat-lbl">${remaining >= 0 ? 'Remaining' : 'Over Budget'}</div>
-        <div class="stat-delta ${remaining >= 0 ? 'pos' : 'neg'}">${remaining >= 0 ? Math.round((remaining/salary)*100) + '% of income' : 'Exceeded income'}</div>
+        <div class="stat-lbl">${remaining >= 0 ? 'Still Available' : 'Over Budget'}</div>
+        <div class="stat-delta ${remaining >= 0 ? 'pos' : 'neg'}">${remaining >= 0 ? Math.round((remaining/salary)*100) + '% of income left 💪' : 'Let\'s rein it in 🤏'}</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-icon">🏦</div>
+      <div class="stat-card sc-savings">
+        <div class="stat-icon">🐖</div>
         <div class="stat-val text-emerald">${savingsRate}%</div>
         <div class="stat-lbl">Savings Rate</div>
         <div class="stat-delta ${savingsRate >= 20 ? 'pos' : savingsRate >= 10 ? 'neu' : 'neg'}">
-          ${savingsRate >= 20 ? '🎯 On track' : savingsRate >= 10 ? 'Room to improve' : 'Below recommended'}
+          ${savingsRate >= 20 ? 'Killing it! 🔥' : savingsRate >= 10 ? 'Getting there 👀' : 'Room to grow 🌱'}
         </div>
       </div>
     </div>

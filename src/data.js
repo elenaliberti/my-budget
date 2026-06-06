@@ -1,17 +1,17 @@
 // ── Default data structure ────────────────────────────────────────────────────
 
 const DEFAULT_CATEGORIES = [
-  { id: 'housing',       name: 'Housing',        icon: '🏠', color: '#6366f1', budget: 0, essential: true  },
-  { id: 'food',          name: 'Food & Dining',   icon: '🍽️', color: '#f59e0b', budget: 0, essential: true  },
-  { id: 'transport',     name: 'Transport',       icon: '🚌', color: '#3b82f6', budget: 0, essential: true  },
+  { id: 'housing',       name: 'Housing',        icon: '🏠', color: '#7c3aed', budget: 0, essential: true  },
+  { id: 'food',          name: 'Food & Dining',   icon: '🍽️', color: '#f97316', budget: 0, essential: true  },
+  { id: 'transport',     name: 'Transport',       icon: '🚌', color: '#0ea5e9', budget: 0, essential: true  },
   { id: 'health',        name: 'Health',          icon: '💊', color: '#10b981', budget: 0, essential: true  },
-  { id: 'utilities',     name: 'Utilities',       icon: '⚡', color: '#f97316', budget: 0, essential: true  },
-  { id: 'shopping',      name: 'Shopping',        icon: '🛍️', color: '#ec4899', budget: 0, essential: false },
+  { id: 'utilities',     name: 'Utilities',       icon: '⚡', color: '#f59e0b', budget: 0, essential: true  },
+  { id: 'shopping',      name: 'Shopping',        icon: '🛍️', color: '#f43f5e', budget: 0, essential: false },
   { id: 'entertainment', name: 'Entertainment',   icon: '🎬', color: '#8b5cf6', budget: 0, essential: false },
   { id: 'subscriptions', name: 'Subscriptions',   icon: '📱', color: '#14b8a6', budget: 0, essential: false },
-  { id: 'education',     name: 'Education',       icon: '📚', color: '#06b6d4', budget: 0, essential: false },
-  { id: 'savings',       name: 'Savings',         icon: '🏦', color: '#10b981', budget: 0, essential: true  },
-  { id: 'other',         name: 'Other',           icon: '📦', color: '#6b7280', budget: 0, essential: false },
+  { id: 'education',     name: 'Education',       icon: '📚', color: '#3b82f6', budget: 0, essential: false },
+  { id: 'savings',       name: 'Savings',         icon: '🐖', color: '#10b981', budget: 0, essential: true  },
+  { id: 'other',         name: 'Other',           icon: '📦', color: '#94a3b8', budget: 0, essential: false },
 ]
 
 function defaultData() {
