@@ -85,8 +85,6 @@ function updateSidebar() {
     profile.salaryNet > 0 ? c(profile.salaryNet, profCur()) : '—'
   const { score } = calcHealthScore(state.data)
   document.getElementById('sidebar-score').textContent = score ? `${score}/100` : '—'
-  const miniCanvas = document.getElementById('health-mini-ring')
-  if (score) drawRing(miniCanvas, score / 100, '#10b981', { lineWidth: 4, padding: 3 })
 }
 
 // ── Setup Prompt ──────────────────────────────────────────────────────────────
