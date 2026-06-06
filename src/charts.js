@@ -45,9 +45,13 @@ function drawDonutChart(canvas, slices, opts = {}) {
 function drawRing(canvas, progress, color, opts = {}) {
   const ctx = canvas.getContext('2d')
   const dpr = window.devicePixelRatio || 1
-  const w = canvas.clientWidth || canvas.width
-  const h = canvas.clientHeight || canvas.height
-  canvas.width = w * dpr
+  // Prefer explicit CSS style over clientWidth — clientWidth grows each redraw
+  // when no CSS dimensions are set, because setting canvas.width changes layout size.
+  const w = parseFloat(canvas.style.width) || canvas.clientWidth || canvas.width || 36
+  const h = parseFloat(canvas.style.height) || canvas.clientHeight || canvas.height || 36
+  canvas.style.width  = w + 'px'   // lock CSS size so it never grows
+  canvas.style.height = h + 'px'
+  canvas.width  = w * dpr
   canvas.height = h * dpr
   ctx.scale(dpr, dpr)
   ctx.clearRect(0, 0, w, h)
