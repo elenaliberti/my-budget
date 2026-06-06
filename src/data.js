@@ -1,4 +1,4 @@
-// ── Default data structure ────────────────────────────────────────────────────
+// ── Default categories ────────────────────────────────────────────────────────
 
 const DEFAULT_CATEGORIES = [
   { id: 'housing',       name: 'Housing',        icon: '🏠', color: '#7c3aed', budget: 0, essential: true  },
@@ -10,21 +10,27 @@ const DEFAULT_CATEGORIES = [
   { id: 'entertainment', name: 'Entertainment',   icon: '🎬', color: '#8b5cf6', budget: 0, essential: false },
   { id: 'subscriptions', name: 'Subscriptions',   icon: '📱', color: '#14b8a6', budget: 0, essential: false },
   { id: 'education',     name: 'Education',       icon: '📚', color: '#3b82f6', budget: 0, essential: false },
-  { id: 'savings',       name: 'Savings',         icon: '🐖', color: '#10b981', budget: 0, essential: true  },
   { id: 'other',         name: 'Other',           icon: '📦', color: '#94a3b8', budget: 0, essential: false },
 ]
 
 function defaultData() {
   return {
-    profile: { name: '', currency: '£', salaryNet: 0, location: 'London', updatedAt: null },
+    profile: {
+      name: '',
+      currency: '£',
+      salaryNet: 0,          // default/template salary (overrideable per month)
+      location: 'London',
+      gbpToEurRate: 1.17,    // live GBP → EUR rate for debt conversion
+      updatedAt: null
+    },
     categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
-    transactions: [],
+    monthlyBudgets: [],      // array of saved monthly plan snapshots
     goals: [],
     loans: [],
   }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function uuid() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -33,14 +39,14 @@ function uuid() {
   })
 }
 
-function fmtCurrency(amount, currency = '€') {
+function fmtCurrency(amount, currency = '£') {
   const abs = Math.abs(amount)
-  const formatted = abs >= 1000 ? (abs / 1000).toFixed(1) + 'k' : abs.toFixed(2)
+  const formatted = abs >= 1000 ? (abs / 1000).toFixed(1) + 'k' : abs.toFixed(0)
   return `${amount < 0 ? '-' : ''}${currency}${formatted}`
 }
 
-function fmtCurrencyFull(amount, currency = '€') {
-  return `${amount < 0 ? '-' : ''}${currency}${Math.abs(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+function fmtCurrencyFull(amount, currency = '£') {
+  return `${amount < 0 ? '-' : ''}${currency}${Math.abs(amount).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 function getMonthKey(date) {
@@ -54,12 +60,12 @@ function getCurrentMonthKey() {
 
 function monthLabel(key) {
   const [y, m] = key.split('-').map(Number)
-  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+  return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' })
 }
 
 function monthLabelLong(key) {
   const [y, m] = key.split('-').map(Number)
-  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
 }
 
 function addMonths(key, n) {
@@ -78,171 +84,185 @@ function getLastNMonths(n) {
   return keys
 }
 
-// ── Aggregations ─────────────────────────────────────────────────────────────
+// ── Monthly budget helpers ────────────────────────────────────────────────────
 
-function getSpendingByMonth(transactions) {
-  const map = {}
-  transactions.forEach(t => {
-    if (t.type !== 'expense') return
-    const key = getMonthKey(t.date)
-    map[key] = (map[key] || 0) + t.amount
-  })
-  return map
+function getMonthBudget(data, monthKey) {
+  return data.monthlyBudgets.find(b => b.month === monthKey) || null
 }
 
-function getSpendingByCategory(transactions, monthKey) {
-  const map = {}
-  transactions.forEach(t => {
-    if (t.type !== 'expense') return
-    if (monthKey && getMonthKey(t.date) !== monthKey) return
-    map[t.category] = (map[t.category] || 0) + t.amount
-  })
-  return map
+function getOrCreateMonthBudget(data, monthKey) {
+  const existing = getMonthBudget(data, monthKey)
+  if (existing) return JSON.parse(JSON.stringify(existing))
+  // Create draft from template categories
+  const allocations = {}
+  data.categories.forEach(c => { allocations[c.id] = c.budget })
+  return {
+    id: null,  // null = unsaved draft
+    month: monthKey,
+    income: data.profile.salaryNet || 0,
+    notes: '',
+    allocations,
+    savedAt: null
+  }
 }
 
-function getMonthlyByCategory(transactions) {
-  const map = {}
-  transactions.forEach(t => {
-    if (t.type !== 'expense') return
-    const key = getMonthKey(t.date)
-    if (!map[key]) map[key] = {}
-    map[key][t.category] = (map[key][t.category] || 0) + t.amount
-  })
-  return map
+function calcMonthSummary(data, budget) {
+  const catTotal  = Object.values(budget.allocations || {}).reduce((s, v) => s + (v || 0), 0)
+  const goalTotal = data.goals.reduce((s, g) => s + (g.monthlyContribution || 0), 0)
+  const debtTotal = data.loans.reduce((s, l) => s + loanMonthlyInProfileCurrency(data, l), 0)
+  const totalCommitted = catTotal + goalTotal + debtTotal
+  const remaining = budget.income - totalCommitted
+  return { catTotal, goalTotal, debtTotal, totalCommitted, remaining }
 }
 
-// ── Financial Health Score (0–100) ──────────────────────────────────────────
+// Convert a loan's monthly payment to profile currency
+function loanMonthlyInProfileCurrency(data, loan) {
+  const pay = loan.monthlyPayment || 0
+  if (!pay) return 0
+  const lCur  = loan.currency    || data.profile.currency
+  const pCur  = data.profile.currency
+  const rate  = data.profile.gbpToEurRate || 1
+  if (lCur === pCur) return pay
+  // loan in EUR, profile in GBP: how much GBP does the user need to send?
+  if (lCur === '€' && pCur === '£') return pay / rate   // GBP needed to produce that EUR
+  if (lCur === '£' && pCur === '€') return pay * rate
+  return pay
+}
+
+// How much EUR is received when user sends X GBP (or vice versa)
+function convertPayment(data, amount, fromCurrency, toCurrency) {
+  const rate = data.profile.gbpToEurRate || 1
+  if (fromCurrency === toCurrency) return amount
+  if (fromCurrency === '£' && toCurrency === '€') return amount * rate
+  if (fromCurrency === '€' && toCurrency === '£') return amount / rate
+  return amount
+}
+
+// ── Financial Health Score (plan-based) ──────────────────────────────────────
 
 function calcHealthScore(data) {
-  const { profile, categories, transactions } = data
+  const { profile, categories, goals, loans, monthlyBudgets } = data
   const salary = profile.salaryNet
   if (!salary) return { score: 0, breakdown: [] }
 
-  const currentMonth = getCurrentMonthKey()
-  const lastMonths = getLastNMonths(3).slice(0, -1)
-  const spendingByMonth = getSpendingByMonth(transactions)
+  const curBudget = getOrCreateMonthBudget(data, getCurrentMonthKey())
+  const income    = curBudget.income || salary
+  const { catTotal, goalTotal, debtTotal, totalCommitted, remaining } = calcMonthSummary(data, curBudget)
 
-  const recentSpending = lastMonths.reduce((s, k) => s + (spendingByMonth[k] || 0), 0)
-  const avgMonthlySpend = lastMonths.length ? recentSpending / lastMonths.length : 0
+  // 1. Savings / goal rate (0–30)
+  const savingsRate = income > 0 ? goalTotal / income : 0
+  const savingsPts  = Math.min(30, Math.round(savingsRate * 150))
 
-  const totalBudget = categories.reduce((s, c) => s + c.budget, 0)
-  const savingsCat = categories.find(c => c.id === 'savings')
-  const savingsBudget = savingsCat ? savingsCat.budget : 0
-  const savingsRate = salary ? savingsBudget / salary : 0
+  // 2. Budget coverage — is income fully planned? (0–25)
+  const coveragePct = income > 0 ? totalCommitted / income : 0
+  let coveragePts = 0
+  if (coveragePct >= 0.85 && coveragePct <= 1.0) coveragePts = 25
+  else if (coveragePct >= 0.7)  coveragePts = 18
+  else if (coveragePct >= 0.5)  coveragePts = 10
+  else if (totalCommitted > 0)  coveragePts = 5
 
-  // Component 1: Savings rate (0–30 pts)
-  const savingsPts = Math.min(30, Math.round(savingsRate * 100))
+  // 3. Debt burden — lower is better (0–20)
+  const debtRate = income > 0 ? debtTotal / income : 0
+  const debtPts  = debtTotal === 0 ? 20 : Math.max(0, Math.round(20 * (1 - debtRate * 2)))
 
-  // Component 2: Budget adherence (0–25 pts) — how close to budget are we?
-  let adherencePts = 25
-  if (avgMonthlySpend > 0 && totalBudget > 0) {
-    const ratio = avgMonthlySpend / totalBudget
-    if (ratio <= 1.0) adherencePts = Math.round(25 * (1 - Math.max(0, ratio - 0.8) / 0.2))
-    else adherencePts = Math.max(0, Math.round(25 * (1 - (ratio - 1) * 2)))
-  }
+  // 4. Setup completeness — has a saved plan, categories filled (0–25)
+  const hasSaved  = monthlyBudgets.some(b => b.month === getCurrentMonthKey())
+  const catFilled = categories.filter(c => (curBudget.allocations[c.id] || 0) > 0).length
+  const setupPts  = Math.round((hasSaved ? 10 : 0) + Math.min(15, catFilled * 2))
 
-  // Component 3: Essential vs discretionary ratio (0–20 pts)
-  const spendingByCat = getSpendingByCategory(transactions, currentMonth)
-  const essentialIds = categories.filter(c => c.essential).map(c => c.id)
-  const totalSpent = Object.values(spendingByCat).reduce((a, b) => a + b, 0)
-  const essentialSpent = essentialIds.reduce((s, id) => s + (spendingByCat[id] || 0), 0)
-  const essentialRatio = totalSpent > 0 ? essentialSpent / totalSpent : 1
-  const ratioPts = Math.round(20 * Math.min(1, essentialRatio + 0.1))
-
-  // Component 4: Budget setup completeness (0–25 pts)
-  const setupPts = totalBudget > 0 && salary > 0 ? Math.min(25, Math.round(25 * Math.min(1, totalBudget / salary))) : 0
-
-  const score = Math.min(100, savingsPts + adherencePts + ratioPts + setupPts)
+  const score = Math.min(100, savingsPts + coveragePts + debtPts + setupPts)
 
   return {
     score,
     breakdown: [
-      { label: 'Savings rate',     pts: savingsPts,   max: 30, color: '#10b981' },
-      { label: 'Budget adherence', pts: adherencePts, max: 25, color: '#6366f1' },
-      { label: 'Spending balance', pts: ratioPts,     max: 20, color: '#f59e0b' },
-      { label: 'Setup quality',    pts: setupPts,     max: 25, color: '#3b82f6' },
+      { label: 'Savings rate',     pts: savingsPts,  max: 30, color: '#10b981' },
+      { label: 'Budget quality',   pts: coveragePts, max: 25, color: '#7c3aed' },
+      { label: 'Debt burden',      pts: debtPts,     max: 20, color: '#f43f5e' },
+      { label: 'Setup quality',    pts: setupPts,    max: 25, color: '#0ea5e9' },
     ]
   }
 }
 
-// ── Forecast algorithm ───────────────────────────────────────────────────────
-
-function forecastSpending(data, horizonMonths = 3) {
-  const { transactions, categories } = data
-  const monthly = getMonthlyByCategory(transactions)
-  const allMonths = Object.keys(monthly).sort()
-  const recentMonths = allMonths.slice(-6)
-
-  const result = {}
-  categories.forEach(cat => {
-    if (cat.id === 'savings') return
-    const vals = recentMonths.map(m => monthly[m]?.[cat.id] || 0)
-    if (vals.every(v => v === 0)) { result[cat.id] = { avg: 0, forecast: Array(horizonMonths).fill(0), trend: 0 }; return }
-
-    const n = vals.length
-    const weights = vals.map((_, i) => i + 1)
-    const totalW = weights.reduce((a, b) => a + b, 0)
-    const wma = vals.reduce((s, v, i) => s + v * weights[i], 0) / totalW
-
-    const xMean = (n - 1) / 2
-    const yMean = vals.reduce((a, b) => a + b, 0) / n
-    const num = vals.reduce((s, v, i) => s + (i - xMean) * (v - yMean), 0)
-    const den = vals.reduce((s, _, i) => s + Math.pow(i - xMean, 2), 0) || 1
-    const slope = num / den
-
-    result[cat.id] = {
-      avg: wma,
-      history: vals,
-      historyMonths: recentMonths,
-      trend: slope,
-      forecast: Array.from({ length: horizonMonths }, (_, i) => Math.max(0, wma + slope * (i + 1)))
-    }
-  })
-  return result
-}
-
-// ── Smart insights ───────────────────────────────────────────────────────────
+// ── Smart insights (plan-based) ───────────────────────────────────────────────
 
 function generateInsights(data) {
-  const { transactions, categories, profile } = data
   const insights = []
-  const cur = getCurrentMonthKey()
-  const prev = addMonths(cur, -1)
+  const { profile, goals, loans, categories } = data
   const salary = profile.salaryNet
+  const curBudget = getOrCreateMonthBudget(data, getCurrentMonthKey())
+  const income = curBudget.income || salary
+  const { catTotal, goalTotal, debtTotal, totalCommitted, remaining } = calcMonthSummary(data, curBudget)
 
-  const spendCur = getSpendingByCategory(transactions, cur)
-  const spendPrev = getSpendingByCategory(transactions, prev)
-  const totalCur = Object.values(spendCur).reduce((a, b) => a + b, 0)
-
-  categories.forEach(cat => {
-    const curAmt = spendCur[cat.id] || 0
-    const prevAmt = spendPrev[cat.id] || 0
-    const budget = cat.budget
-
-    if (budget > 0 && curAmt > budget * 1.1) {
-      insights.push({ type: 'bad', icon: '⚠️', text: `${cat.name} is ${fmtCurrency(curAmt - budget)} over budget this month.` })
-    } else if (budget > 0 && curAmt <= budget * 0.5 && curAmt > 0) {
-      insights.push({ type: 'good', icon: '✅', text: `Great job on ${cat.name}! You've only used ${Math.round(curAmt/budget*100)}% of your budget.` })
-    }
-
-    if (prevAmt > 0 && curAmt > prevAmt * 1.3) {
-      insights.push({ type: 'warn', icon: '📈', text: `${cat.name} spending is up ${Math.round((curAmt/prevAmt-1)*100)}% compared to last month.` })
-    }
-  })
-
-  if (salary > 0) {
-    const savingsTarget = categories.find(c => c.id === 'savings')?.budget || 0
-    const remaining = salary - totalCur
-    if (remaining > savingsTarget && savingsTarget > 0) {
-      insights.push({ type: 'good', icon: '💰', text: `You're on track to save ${fmtCurrency(remaining)} this month — ${fmtCurrency(remaining - savingsTarget)} above your savings goal!` })
-    } else if (remaining < 0) {
-      insights.push({ type: 'bad', icon: '🚨', text: `You've exceeded your monthly income by ${fmtCurrency(Math.abs(remaining))} this month.` })
-    }
+  if (!salary) {
+    insights.push({ type: 'info', icon: '👋', text: 'Set your default salary in Budget Setup to get personalised insights.' })
+    return insights
   }
 
-  if (insights.length === 0) {
-    insights.push({ type: 'info', icon: '📊', text: 'Add more transactions to get personalized spending insights.' })
+  const debtPct  = income > 0 ? Math.round(debtTotal  / income * 100) : 0
+  const goalPct  = income > 0 ? Math.round(goalTotal   / income * 100) : 0
+  const catPct   = income > 0 ? Math.round(catTotal    / income * 100) : 0
+
+  if (remaining < 0) {
+    insights.push({ type: 'bad', icon: '🚨', text: `You're ${fmtCurrencyFull(Math.abs(remaining), profile.currency)} over your income this month — something needs to give!` })
+  } else if (remaining < income * 0.05) {
+    insights.push({ type: 'warn', icon: '😬', text: `Only ${fmtCurrencyFull(remaining, profile.currency)} unplanned — things are tight. Any surprise expense could throw you off.` })
+  } else if (remaining > 0) {
+    insights.push({ type: 'good', icon: '🎉', text: `${fmtCurrencyFull(remaining, profile.currency)} is unplanned — consider routing it to a goal or padding your savings!` })
+  }
+
+  if (debtPct > 25) {
+    insights.push({ type: 'warn', icon: '📉', text: `Debt repayments are ${debtPct}% of your income. High, but you're chipping away at it 💪` })
+  } else if (debtPct > 0) {
+    insights.push({ type: 'info', icon: '📉', text: `${debtPct}% of income goes to debt repayment — that's manageable. Keep going!` })
+  }
+
+  if (goalPct >= 20) {
+    insights.push({ type: 'good', icon: '🏆', text: `${goalPct}% going to goals — you're absolutely smashing it! Future you will be grateful.` })
+  } else if (goalPct >= 10) {
+    insights.push({ type: 'good', icon: '✨', text: `${goalPct}% going to savings goals. Solid! Aim for 20% if you can.` })
+  } else if (goalPct > 0) {
+    insights.push({ type: 'warn', icon: '🌱', text: `Only ${goalPct}% going to goals right now. Even small increases compound over time!` })
+  }
+
+  if (catPct > 80) {
+    insights.push({ type: 'warn', icon: '💸', text: `Living expenses are ${catPct}% of income — leaves little room for saving.` })
+  }
+
+  const unfilledCats = categories.filter(c => !(curBudget.allocations[c.id] > 0))
+  if (unfilledCats.length > 3) {
+    insights.push({ type: 'info', icon: '📋', text: `${unfilledCats.length} categories aren't budgeted yet. Filling them in gives you a clearer picture.` })
+  }
+
+  if (loans.length === 0 && goals.length === 0 && !insights.length) {
+    insights.push({ type: 'info', icon: '🚀', text: 'Add your goals and debt so your budget plan can show the full picture.' })
   }
 
   return insights.slice(0, 4)
+}
+
+// ── Rule-based allocation ─────────────────────────────────────────────────────
+
+function applyAllocationRule(data, rule, income) {
+  const loc = (data.profile.location || '').toLowerCase()
+  const isUK = ['london','manchester','edinburgh','bristol','birmingham','dublin'].some(c => loc.includes(c))
+  const isEU = ['paris','amsterdam','berlin'].some(c => loc.includes(c))
+
+  const RULES = {
+    '503020': isUK
+      ? { housing:.37, food:.07, transport:.05, utilities:.00, health:.00, shopping:.06, entertainment:.05, subscriptions:.04, education:.03, other:.13 }
+      : isEU
+      ? { housing:.32, food:.08, transport:.05, utilities:.02, health:.02, shopping:.07, entertainment:.06, subscriptions:.04, education:.04, other:.10 }
+      : { housing:.25, food:.10, transport:.05, utilities:.05, health:.05, shopping:.08, entertainment:.07, subscriptions:.05, education:.05, other:.05 },
+    '702010': isUK
+      ? { housing:.38, food:.08, transport:.06, utilities:.00, health:.00, shopping:.08, entertainment:.06, subscriptions:.04, education:.03, other:.07 }
+      : { housing:.28, food:.12, transport:.08, utilities:.06, health:.06, shopping:.08, entertainment:.06, subscriptions:.04, education:.02, other:.00 },
+    '601030': isUK
+      ? { housing:.32, food:.07, transport:.05, utilities:.00, health:.00, shopping:.04, entertainment:.04, subscriptions:.03, education:.05, other:.10 }
+      : { housing:.22, food:.10, transport:.07, utilities:.05, health:.06, shopping:.05, entertainment:.05, subscriptions:.03, education:.05, other:.02 },
+  }
+  const alloc = RULES[rule]
+  if (!alloc) return
+  data.categories.forEach(cat => {
+    if (alloc[cat.id] !== undefined) cat.budget = Math.round(income * alloc[cat.id])
+  })
 }

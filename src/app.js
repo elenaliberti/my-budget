@@ -2,55 +2,41 @@
 
 const CURRENCIES = ['£','€','$','¥','₹','Fr','kr','A$','C$','CHF','zł','R$']
 
+const FUN_QUOTES = [
+  'Every pound planned is a step toward freedom 🦋',
+  'You\'re not just budgeting — you\'re building your future 🏗️',
+  'Financial anxiety? We\'re turning that into financial clarity ✨',
+  'Small plans, big dreams. You\'ve got this 🚀',
+  'Money is a tool — you\'re the boss 👑',
+  'Past you made a budget. Future you says thank you 💌',
+]
+
+const MOOD_EMOJIS = { excellent: '🤩', good: '😊', fair: '😌', poor: '😬' }
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
 const state = {
-  view: 'dashboard',
+  view: 'overview',
   data: defaultData(),
-  viewMonth: getCurrentMonthKey(),      // dashboard month navigation
-  txFilter: { search: '', category: 'all', month: getCurrentMonthKey() },
-  simAdjust: {},
-  _forecastChartData: null,
+  planMonth: getCurrentMonthKey(),
+  _draftBudget: null,   // in-progress edits for Month Plan
 }
 
 async function saveData() { await window.budget.save(state.data) }
 
 // ── Currency helpers ──────────────────────────────────────────────────────────
 
-function txCur(tx)   { return tx?.currency   || state.data.profile.currency }
-function loanCur(l)  { return l?.currency    || state.data.profile.currency }
-function goalCur(g)  { return g?.currency    || state.data.profile.currency }
 function profCur()   { return state.data.profile.currency }
-
+function loanCur(l)  { return l?.currency || profCur() }
+function goalCur(g)  { return g?.currency || profCur() }
 function c(amount, currency) { return fmtCurrencyFull(amount, currency || profCur()) }
 function cs(amount, currency) { return fmtCurrency(amount, currency || profCur()) }
-
-// Group transaction totals by currency (for mixed-currency display)
-function totalsByCurrency(transactions, monthKey) {
-  const totals = {}
-  transactions.forEach(t => {
-    if (t.type !== 'expense') return
-    if (monthKey && getMonthKey(t.date) !== monthKey) return
-    const cur = txCur(t)
-    totals[cur] = (totals[cur] || 0) + t.amount
-  })
-  return totals
-}
-
-function formatMixedTotal(totals) {
-  return Object.entries(totals).map(([cur, amt]) => c(amt, cur)).join(' + ') || c(0)
-}
-
-function primaryTotal(totals) {
-  return totals[profCur()] || 0
-}
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 
 function navigate(view) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === view))
   state.view = view
-  state.simAdjust = {}
   render()
 }
 
@@ -62,19 +48,18 @@ function render() {
 
   updateSidebar()
 
-  if (!hasSalary && state.view !== 'budget') {
+  if (!hasSalary && state.view !== 'plan') {
     container.innerHTML = renderSetupPrompt()
-    container.querySelector('#go-setup-btn')?.addEventListener('click', () => navigate('budget'))
+    container.querySelector('#go-setup-btn')?.addEventListener('click', () => navigate('plan'))
     return
   }
 
   switch (state.view) {
-    case 'dashboard':    container.innerHTML = renderDashboard();    break
-    case 'budget':       container.innerHTML = renderBudget();       break
-    case 'transactions': container.innerHTML = renderTransactions(); break
-    case 'forecast':     container.innerHTML = renderForecast();     break
-    case 'goals':        container.innerHTML = renderGoals();        break
-    case 'loans':        container.innerHTML = renderLoans();        break
+    case 'overview': container.innerHTML = renderOverview(); break
+    case 'plan':     container.innerHTML = renderMonthPlan(); break
+    case 'history':  container.innerHTML = renderHistory(); break
+    case 'goals':    container.innerHTML = renderGoals();   break
+    case 'loans':    container.innerHTML = renderLoans();   break
   }
   attachDynamicListeners()
 }
@@ -84,7 +69,9 @@ function updateSidebar() {
   document.getElementById('sidebar-salary').textContent =
     profile.salaryNet > 0 ? c(profile.salaryNet, profCur()) : '—'
   const { score } = calcHealthScore(state.data)
-  document.getElementById('sidebar-score').textContent = score ? `${score}/100` : '—'
+  const grade = score >= 80 ? 'excellent' : score >= 60 ? 'good' : score >= 40 ? 'fair' : 'poor'
+  const el = document.getElementById('sidebar-score')
+  if (el) el.textContent = score ? `${score}/100 ${MOOD_EMOJIS[grade]}` : '—'
 }
 
 // ── Setup Prompt ──────────────────────────────────────────────────────────────
@@ -99,111 +86,113 @@ function renderSetupPrompt() {
     </div>`
 }
 
-// ── Dashboard ─────────────────────────────────────────────────────────────────
+// ── Overview ──────────────────────────────────────────────────────────────────
 
-function renderDashboard() {
-  const { profile, categories, transactions } = state.data
-  const cur = state.viewMonth
-  const prev = addMonths(cur, -1)
-  const isCurrentMonth = cur === getCurrentMonthKey()
-  const salary = profile.salaryNet
-
-  const totCur = totalsByCurrency(transactions, cur)
-  const totPrev = totalsByCurrency(transactions, prev)
-  const totalCur = Object.values(totCur).reduce((a, b) => a + b, 0)
-  const totalPrevPrimary = primaryTotal(totPrev)
-  const remaining = salary - primaryTotal(totCur)
-  const isMixed = Object.keys(totCur).length > 1
-
-  const savingsCat = categories.find(c => c.id === 'savings')
-  const savingsRate = savingsCat?.budget > 0 ? Math.round((savingsCat.budget / salary) * 100) : 0
+function renderOverview() {
+  const { profile, goals, loans } = state.data
+  const cur = getCurrentMonthKey()
+  const budget = getOrCreateMonthBudget(state.data, cur)
+  const income = budget.income || profile.salaryNet
+  const { catTotal, goalTotal, debtTotal, totalCommitted, remaining } = calcMonthSummary(state.data, budget)
   const { score, breakdown } = calcHealthScore(state.data)
   const grade = score >= 80 ? 'excellent' : score >= 60 ? 'good' : score >= 40 ? 'fair' : 'poor'
   const gradeLabel = score >= 80 ? 'Excellent' : score >= 60 ? 'Good' : score >= 40 ? 'Fair' : 'Needs Work'
+  const isSaved = state.data.monthlyBudgets.some(b => b.month === cur)
+  const insights = generateInsights(state.data)
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+  const name = profile.name || 'you'
+  const quote = FUN_QUOTES[new Date().getDate() % FUN_QUOTES.length]
 
-  const spendDelta = totalPrevPrimary > 0
-    ? ((primaryTotal(totCur) - totalPrevPrimary) / totalPrevPrimary * 100).toFixed(1) : null
-  const recentTx = [...transactions]
-    .filter(t => getMonthKey(t.date) === cur)
-    .sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 7)
-  const spendCur = getSpendingByCategory(transactions, cur)
-  const catSpendsWithBudget = categories
-    .filter(c => c.id !== 'savings' && (spendCur[c.id] || c.budget))
-    .map(c => ({ ...c, spent: spendCur[c.id] || 0 }))
-    .sort((a, b) => b.spent - a.spent).slice(0, 6)
+  // Debt total remaining
+  const totalDebtEur = loans.reduce((s, l) => {
+    const repaid = (l.payments || []).reduce((a, p) => a + p.amount, 0)
+    return s + Math.max(0, l.totalDebt - repaid)
+  }, 0)
 
-  const insights = isCurrentMonth ? generateInsights(state.data) : []
-  const last6 = getLastNMonths(6)
-  const spendByMonth = getSpendingByMonth(transactions)
-  const totalBudget = categories.filter(c => c.id !== 'savings').reduce((s, c) => s + c.budget, 0)
+  // Goals summary
+  const totalGoalTarget  = goals.reduce((s, g) => s + g.target, 0)
+  const totalGoalCurrent = goals.reduce((s, g) => s + g.current, 0)
+  const goalsPct = totalGoalTarget > 0 ? totalGoalCurrent / totalGoalTarget : 0
 
-  // Monthly history (last 12 months for history table)
-  const histMonths = getLastNMonths(12).reverse()
+  // On-track analysis
+  const catPct   = income > 0 ? Math.round(catTotal  / income * 100) : 0
+  const goalPct  = income > 0 ? Math.round(goalTotal  / income * 100) : 0
+  const debtPct  = income > 0 ? Math.round(debtTotal  / income * 100) : 0
+  const freePct  = income > 0 ? Math.round(remaining  / income * 100) : 0
 
   return `
     <div class="page-header">
       <div class="page-header-row">
         <div>
-          <div class="page-title" style="display:flex;align-items:center;gap:12px;">
-            Dashboard
-            <div class="month-nav">
-              <button class="month-nav-btn" id="dash-prev-month">←</button>
-              <span class="month-nav-label">${monthLabelLong(cur)}</span>
-              <button class="month-nav-btn" id="dash-next-month" ${isCurrentMonth ? 'disabled' : ''}>→</button>
-              ${!isCurrentMonth ? `<button class="month-nav-today" id="dash-today">Today</button>` : ''}
-            </div>
-          </div>
+          <div class="page-title">${greeting}, ${name}! ${MOOD_EMOJIS[grade]}</div>
+          <div class="page-sub">${monthLabelLong(cur)} · ${quote}</div>
         </div>
-        <button class="btn btn-primary btn-sm" id="add-tx-btn-dash">+ Add Transaction</button>
+        <button class="btn btn-primary btn-sm" id="go-plan-btn">📋 Open Month Plan</button>
       </div>
     </div>
 
     <div class="stats-row">
       <div class="stat-card sc-income">
         <div class="stat-icon">💰</div>
-        <div class="stat-val">${cs(salary, profCur())}</div>
-        <div class="stat-lbl">Monthly Income</div>
-        <div class="stat-delta neu">Your take-home ✨</div>
+        <div class="stat-val">${cs(income, profCur())}</div>
+        <div class="stat-lbl">Income This Month</div>
+        <div class="stat-delta neu">${isSaved ? '✅ Plan saved' : '⚠️ Plan not saved yet'}</div>
       </div>
       <div class="stat-card sc-spent">
-        <div class="stat-icon">🧾</div>
-        <div class="stat-val ${primaryTotal(totCur) > salary ? 'text-red' : ''}">${isMixed ? formatMixedTotal(totCur) : cs(primaryTotal(totCur), profCur())}</div>
-        <div class="stat-lbl">Spent${!isCurrentMonth ? ' — '+monthLabel(cur) : ' This Month'}</div>
-        <div class="stat-delta ${spendDelta === null ? 'neu' : primaryTotal(totCur) > totalPrevPrimary ? 'neg' : 'pos'}">
-          ${spendDelta !== null ? (primaryTotal(totCur) > totalPrevPrimary ? '↑' : '↓') + Math.abs(spendDelta) + '% vs last month' : 'First month — you got this!'}
-        </div>
+        <div class="stat-icon">🏠</div>
+        <div class="stat-val">${cs(catTotal, profCur())}</div>
+        <div class="stat-lbl">Living Expenses</div>
+        <div class="stat-delta neu">${catPct}% of income</div>
       </div>
       <div class="stat-card sc-remain">
         <div class="stat-icon">${remaining >= 0 ? '🎯' : '😬'}</div>
         <div class="stat-val ${remaining < 0 ? 'text-red' : 'text-emerald'}">${cs(Math.abs(remaining), profCur())}</div>
-        <div class="stat-lbl">${remaining >= 0 ? 'Still Available' : 'Over Budget'}</div>
-        <div class="stat-delta ${remaining >= 0 ? 'pos' : 'neg'}">${remaining >= 0 ? Math.round((remaining/salary)*100) + '% of income left 💪' : 'Let\'s rein it in 🤏'}</div>
+        <div class="stat-lbl">${remaining >= 0 ? 'Unplanned / Free' : 'Over Income'}</div>
+        <div class="stat-delta ${remaining >= 0 ? 'pos' : 'neg'}">${freePct >= 0 ? freePct + '% breathing room' : 'Cut something!'}</div>
       </div>
       <div class="stat-card sc-savings">
         <div class="stat-icon">🐖</div>
-        <div class="stat-val text-emerald">${savingsRate}%</div>
-        <div class="stat-lbl">Savings Rate</div>
-        <div class="stat-delta ${savingsRate >= 20 ? 'pos' : savingsRate >= 10 ? 'neu' : 'neg'}">
-          ${savingsRate >= 20 ? 'Killing it! 🔥' : savingsRate >= 10 ? 'Getting there 👀' : 'Room to grow 🌱'}
-        </div>
+        <div class="stat-val text-emerald">${goalPct}%</div>
+        <div class="stat-lbl">Going to Goals</div>
+        <div class="stat-delta ${goalPct >= 20 ? 'pos' : goalPct >= 10 ? 'neu' : 'neg'}">${goalPct >= 20 ? 'Killing it! 🔥' : goalPct >= 10 ? 'Getting there 👀' : 'Room to grow 🌱'}</div>
       </div>
     </div>
 
     <div class="grid-col-7-5 mb20">
       <div class="card">
-        <div class="card-title">Monthly Spending vs Budget — Last 6 Months</div>
-        <canvas id="bar-chart" class="chart" style="width:100%;height:200px;"></canvas>
+        <div class="card-title">How your money is split this month</div>
+        <div class="money-split">
+          ${[
+            { label: '🏠 Living', amount: catTotal, pct: catPct, color: '#7c3aed' },
+            { label: '🏆 Goals',  amount: goalTotal, pct: goalPct, color: '#10b981' },
+            { label: '📉 Debt',   amount: debtTotal, pct: debtPct, color: '#f43f5e' },
+            { label: '✨ Free',   amount: Math.max(0, remaining), pct: Math.max(0, freePct), color: '#0ea5e9' },
+          ].map(row => `
+            <div class="split-row">
+              <div class="split-label">${row.label}</div>
+              <div class="split-bar-track">
+                <div class="split-bar-fill" style="width:${row.pct}%;background:${row.color}"></div>
+              </div>
+              <div class="split-pct" style="color:${row.color}">${row.pct}%</div>
+              <div class="split-amount">${c(row.amount, profCur())}</div>
+            </div>`).join('')}
+        </div>
+        <div class="split-total">
+          <span>Total income: <strong>${c(income, profCur())}</strong></span>
+          <span class="${remaining >= 0 ? 'text-emerald' : 'text-red'}">${remaining >= 0 ? '✅ Balanced' : '⚠️ Over by ' + c(Math.abs(remaining), profCur())}</span>
+        </div>
       </div>
       <div class="card">
-        <div class="card-title">Financial Health Score</div>
+        <div class="card-title">Financial Health — ${score}/100</div>
         <div class="health-score-wrap">
           <div class="health-score-ring">
-            <canvas id="health-ring" style="width:96px;height:96px;"></canvas>
+            <canvas id="health-ring" style="width:90px;height:90px;"></canvas>
           </div>
           <div class="health-score-info">
-            <div class="hs-score" style="color:${score>=80?'#10b981':score>=60?'#3b82f6':score>=40?'#f59e0b':'#ef4444'}">${score}</div>
+            <div class="hs-score" style="color:${score>=80?'#10b981':score>=60?'#7c3aed':score>=40?'#f59e0b':'#f43f5e'}">${score}</div>
             <div class="hs-label">out of 100</div>
-            <div class="hs-grade grade-${grade}">${gradeLabel}</div>
+            <div class="hs-grade grade-${grade}">${MOOD_EMOJIS[grade]} ${gradeLabel}</div>
           </div>
         </div>
         <div class="health-breakdown">
@@ -217,140 +206,133 @@ function renderDashboard() {
       </div>
     </div>
 
-    <div class="grid-col-5-7 mb20">
+    <div class="grid-2 mb20">
       <div class="card">
-        <div class="card-title">Spending by Category — ${monthLabel(cur)}</div>
-        <div class="cat-spend-list">
-          ${catSpendsWithBudget.map(c => {
-            const pct = c.budget > 0 ? Math.min(100, Math.round(c.spent / c.budget * 100)) : 0
-            const over = c.budget > 0 && c.spent > c.budget
+        <div class="card-title">📉 Debt Situation</div>
+        ${loans.length === 0 ? `
+          <div class="empty-state" style="padding:20px">
+            <div class="empty-icon">🎉</div>
+            <div class="empty-sub">No debt tracked. Amazing!</div>
+          </div>` : loans.map(loan => {
+            const repaid = (loan.payments||[]).reduce((s,p)=>s+p.amount,0)
+            const balance = Math.max(0, loan.totalDebt - repaid)
+            const pct = loan.totalDebt > 0 ? Math.round(repaid/loan.totalDebt*100) : 0
+            const lCur = loanCur(loan)
+            const payGBP = loan.monthlyPayment || 0
+            const payEUR = payGBP > 0 && lCur !== profCur() ? convertPayment(state.data, payGBP, profCur(), lCur) : 0
+            const monthsLeft = payGBP > 0 && balance > 0 ? Math.ceil(balance / (payGBP > 0 && lCur !== profCur() ? payEUR : payGBP)) : null
             return `
-              <div class="csl-item">
-                <div class="csl-icon">${c.icon}</div>
-                <div class="csl-info">
-                  <div class="csl-name">${c.name}</div>
-                  <div class="csl-bar-track"><div class="csl-bar-fill" style="width:${pct}%;background:${c.color}"></div></div>
-                </div>
-                <div class="csl-amounts">
-                  <div class="csl-spent ${over?'csl-over':''}">${cs(c.spent, profCur())}</div>
-                  <div class="csl-budget">/ ${cs(c.budget, profCur())}</div>
+              <div class="debt-overview-row">
+                <div class="dor-name">${loan.name}</div>
+                <div class="dor-balance">${c(balance, lCur)} left</div>
+                <div class="dor-bar-track"><div class="dor-bar-fill" style="width:${pct}%"></div></div>
+                <div class="dor-meta">
+                  ${pct}% repaid ·
+                  ${payGBP > 0 ? `${c(payGBP, profCur())}/mo` : 'No monthly payment set'}
+                  ${payEUR > 0 ? ` → ${c(payEUR, lCur)} received` : ''}
+                  ${monthsLeft ? ` · ~${monthsLeft} months left` : ''}
                 </div>
               </div>`
           }).join('')}
-        </div>
       </div>
-      <div class="card" style="display:flex;flex-direction:column;gap:16px;">
-        ${insights.length ? `
-        <div>
-          <div class="card-title">Smart Insights</div>
-          <div class="insight-list">
-            ${insights.map(i => `<div class="insight-item ${i.type}"><span class="insight-icon">${i.icon}</span><span>${i.text}</span></div>`).join('')}
-          </div>
-        </div>` : ''}
-        <div>
-          <div class="card-title">Transactions — ${monthLabel(cur)}</div>
-          <div class="tx-list">
-            ${recentTx.length ? recentTx.map(t => {
-              const cat = state.data.categories.find(c => c.id === t.category) || {icon:'📦',color:'#6b7280',name:t.category}
-              return `
-                <div class="tx-item">
-                  <div class="tx-icon-wrap" style="background:${cat.color}22;">${cat.icon}</div>
-                  <div class="tx-info">
-                    <div class="tx-desc">${t.description || cat.name}</div>
-                    <div class="tx-meta">${cat.name} · ${new Date(t.date).toLocaleDateString('en-GB',{month:'short',day:'numeric'})}</div>
-                  </div>
-                  <div class="tx-amount ${t.type}">${t.type==='income'?'+':'-'}${cs(t.amount, txCur(t))}</div>
-                </div>`
-            }).join('') : `<div class="empty-state" style="padding:20px"><div class="empty-icon">💳</div><div class="empty-sub">No transactions for ${monthLabel(cur)}</div></div>`}
-          </div>
+      <div class="card">
+        <div class="card-title">💡 Situation Check</div>
+        <div class="insight-list">
+          ${insights.map(i => `
+            <div class="insight-item ${i.type}">
+              <span class="insight-icon">${i.icon}</span>
+              <span>${i.text}</span>
+            </div>`).join('')}
         </div>
       </div>
     </div>
 
+    ${goals.length > 0 ? `
     <div class="card mb20">
-      <div class="card-title" style="margin-bottom:14px;">📅 Monthly History</div>
-      <div style="overflow-x:auto;">
-        <table class="history-table">
-          <thead>
-            <tr>
-              <th>Month</th>
-              <th>Spent</th>
-              <th>Budget</th>
-              <th>vs Budget</th>
-              <th>Transactions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${histMonths.map(m => {
-              const mTotals = totalsByCurrency(transactions, m)
-              const mSpent = primaryTotal(mTotals)
-              const mMixed = Object.keys(mTotals).length > 1
-              const mTxCount = transactions.filter(t => t.type==='expense' && getMonthKey(t.date)===m).length
-              const diff = mSpent - totalBudget
-              const isCur2 = m === cur
-              return `
-                <tr class="${isCur2?'history-row-active':''}" style="cursor:pointer;" data-history-month="${m}">
-                  <td><strong>${monthLabelLong(m)}</strong>${m===getCurrentMonthKey()?' <span class="badge-now">now</span>':''}</td>
-                  <td>${mMixed ? formatMixedTotal(mTotals) : cs(mSpent, profCur())}</td>
-                  <td>${cs(totalBudget, profCur())}</td>
-                  <td class="${diff<=0?'text-emerald':'text-red'}">${diff<=0?'✓ '+cs(Math.abs(diff),profCur())+' under':'⚠ '+cs(diff,profCur())+' over'}</td>
-                  <td class="text-muted">${mTxCount} tx</td>
-                </tr>`
-            }).join('')}
-          </tbody>
-        </table>
+      <div class="card-title">🏆 Goals at a Glance</div>
+      <div class="goals-overview-grid">
+        ${goals.map(g => {
+          const gCur = goalCur(g)
+          const pct = g.target > 0 ? Math.min(100, Math.round(g.current/g.target*100)) : 0
+          const remaining2 = g.target - g.current
+          const monthsLeft = g.monthlyContribution > 0 ? Math.ceil(remaining2/g.monthlyContribution) : null
+          return `
+            <div class="goal-overview-card">
+              <div class="goc-icon">${g.icon||'🎯'}</div>
+              <div class="goc-info">
+                <div class="goc-name">${g.name}</div>
+                <div class="goc-bar-track"><div class="goc-bar-fill" style="width:${pct}%;background:${g.color||'#10b981'}"></div></div>
+                <div class="goc-meta">${c(g.current,gCur)} / ${c(g.target,gCur)} · ${pct}%${monthsLeft?` · ~${monthsLeft} mo`:''}</div>
+              </div>
+            </div>`
+        }).join('')}
       </div>
-    </div>`
+    </div>` : ''}
+  `
 }
 
-// ── Budget Setup ──────────────────────────────────────────────────────────────
+// ── Month Plan ────────────────────────────────────────────────────────────────
 
-function renderBudget() {
-  const { profile, categories } = state.data
-  const salary = profile.salaryNet
-  const location = profile.location || ''
-  const totalAllocated = categories.reduce((s, c) => s + c.budget, 0)
-  const remaining = salary - totalAllocated
-  const pct = salary > 0 ? Math.min(100, Math.round((totalAllocated/salary)*100)) : 0
-  const over = totalAllocated > salary
+function renderMonthPlan() {
+  const { profile, categories, goals, loans } = state.data
+  const month = state.planMonth
+  const isCurrentMonth = month === getCurrentMonthKey()
+
+  // Use draft if editing, otherwise load saved or create from template
+  if (!state._draftBudget || state._draftBudget.month !== month) {
+    state._draftBudget = getOrCreateMonthBudget(state.data, month)
+  }
+  const draft = state._draftBudget
+  const income = draft.income || 0
+  const isSaved = state.data.monthlyBudgets.some(b => b.month === month)
+
+  const { catTotal, goalTotal, debtTotal, totalCommitted, remaining } = calcMonthSummary(state.data, draft)
+  const pctUsed = income > 0 ? Math.min(100, Math.round(totalCommitted/income*100)) : 0
+  const over = totalCommitted > income
 
   return `
     <div class="page-header">
       <div class="page-header-row">
         <div>
-          <div class="page-title">Budget Setup</div>
-          <div class="page-sub" style="display:flex;align-items:center;gap:8px;">
-            Define how your monthly income is allocated
-            ${location ? `<span class="location-badge" id="location-badge-btn">📍 ${location}</span>` : ''}
+          <div class="page-title" style="display:flex;align-items:center;gap:12px;">
+            Month Plan
+            <div class="month-nav">
+              <button class="month-nav-btn" id="plan-prev-month">←</button>
+              <span class="month-nav-label">${monthLabelLong(month)}</span>
+              <button class="month-nav-btn" id="plan-next-month" ${isCurrentMonth ? 'disabled' : ''}>→</button>
+              ${!isCurrentMonth ? `<button class="month-nav-today" id="plan-today">Today</button>` : ''}
+            </div>
           </div>
+          <div class="page-sub">${isSaved ? '✅ Plan saved' : '✏️ Unsaved draft — hit Save when ready'}</div>
+        </div>
+        <button class="btn btn-primary" id="save-plan-btn">💾 Save Plan</button>
+      </div>
+    </div>
+
+    <div class="plan-income-card mb20">
+      <div class="pic-label">💰 Income for ${monthLabel(month)}</div>
+      <div class="pic-input-row">
+        <div class="pic-currency">${profCur()}</div>
+        <input type="number" id="plan-income" class="pic-input" value="${income || ''}" placeholder="0" min="0">
+        <div class="pic-hint">
+          ${profile.salaryNet > 0 ? `Default: ${c(profile.salaryNet, profCur())}` : 'Set your default salary in settings'}
+          ${income !== profile.salaryNet && profile.salaryNet > 0 ? ' · <span style="color:var(--amber);font-weight:700;">Custom this month</span>' : ''}
         </div>
       </div>
     </div>
 
-    <div class="salary-hero">
-      <div class="sh-left">
-        <div class="sh-label">Monthly Net Salary</div>
-        <div class="sh-amount">${salary > 0 ? c(salary, profCur()) : '—'}</div>
-        <div class="sh-sub">Take-home pay after taxes &amp; deductions</div>
-        <div class="allocation-summary" style="margin-top:14px;">
-          <div class="alloc-pill allocated">Allocated: ${cs(totalAllocated, profCur())}</div>
-          <div class="alloc-pill ${over?'over':'remaining'}">${over?'Over by: '+cs(totalAllocated-salary,profCur()):'Free: '+cs(remaining,profCur())}</div>
-        </div>
+    <div class="plan-progress-wrap mb20">
+      <div class="plan-progress-bar">
+        <div class="plan-progress-fill ${over ? 'over' : pctUsed > 95 ? 'near' : ''}" style="width:${pctUsed}%"></div>
       </div>
-      <div class="sh-right">
-        <button class="sh-btn sh-btn-primary" id="edit-salary-btn">✏️ Edit Salary</button>
-        <button class="sh-btn sh-btn-secondary" id="set-currency-btn">🌍 ${profCur()} Currency</button>
+      <div class="plan-progress-labels">
+        <span>${cs(totalCommitted, profCur())} planned</span>
+        <span class="${over ? 'text-red' : 'text-emerald'}">${over ? '⚠️ ' + cs(Math.abs(remaining), profCur()) + ' over' : '✅ ' + cs(remaining, profCur()) + ' free'}</span>
       </div>
     </div>
 
-    <div class="budget-progress-bar mb20">
-      <div class="budget-progress-fill ${over?'over':pct>90?'near':''}" style="width:${pct}%"></div>
-    </div>
-
-    <div class="rule-wizard mb20">
-      <div class="rw-text">
-        <strong>Smart Allocation Wizard</strong>${location?` — Tuned for <em>${location}</em>`:''} — pick a rule:
-      </div>
+    <div class="plan-wizard-row mb20">
+      <span class="plan-wizard-label">✨ Auto-fill with a rule:</span>
       <div class="rw-btns">
         <button class="rw-btn" data-rule="503020">50/30/20</button>
         <button class="rw-btn" data-rule="702010">70/20/10</button>
@@ -358,251 +340,185 @@ function renderBudget() {
       </div>
     </div>
 
-    <div class="page-header-row mb12">
-      <div class="card-title" style="font-size:13px;margin-bottom:0;">Category Budgets</div>
-      <button class="btn btn-secondary btn-sm" id="add-cat-btn">+ Add Category</button>
+    <div class="plan-sections">
+
+      <div class="plan-section">
+        <div class="plan-section-header">
+          <div class="psh-title">🏠 Living Expenses</div>
+          <div class="psh-total">${c(catTotal, profCur())}</div>
+        </div>
+        ${categories.map(cat => {
+          const val = draft.allocations[cat.id] || 0
+          const pct = income > 0 && val > 0 ? Math.round(val/income*100) : 0
+          return `
+            <div class="plan-cat-row">
+              <div class="pcr-icon" data-edit-cat="${cat.id}" style="cursor:pointer">${cat.icon}</div>
+              <div class="pcr-info">
+                <div class="pcr-name">${cat.name}${cat.essential ? ' <span class="pcr-essential">need</span>' : ''}</div>
+                ${pct > 0 ? `<div class="pcr-pct">${pct}% of income</div>` : ''}
+              </div>
+              <button class="pcr-del" data-edit-cat="${cat.id}" title="Edit">✏️</button>
+              <button class="pcr-del" data-del-cat="${cat.id}" title="Delete">🗑️</button>
+              <div class="pcr-input-wrap">
+                <span class="pcr-currency">${profCur()}</span>
+                <input type="number" class="plan-cat-input" data-cat="${cat.id}" value="${val || ''}" placeholder="0" min="0" step="10">
+              </div>
+            </div>`
+        }).join('')}
+        <button class="add-cat-btn" id="add-cat-btn">＋ Add category</button>
+      </div>
+
+      ${goals.length > 0 ? `
+      <div class="plan-section plan-section-goals">
+        <div class="plan-section-header">
+          <div class="psh-title">🏆 Goal Contributions <span class="psh-auto-badge">auto</span></div>
+          <div class="psh-total text-emerald">${c(goalTotal, profCur())}</div>
+        </div>
+        ${goals.map(g => {
+          const gCur = goalCur(g)
+          const monthlyPay = g.monthlyContribution || 0
+          const remaining2 = g.target - g.current
+          const monthsLeft = monthlyPay > 0 ? Math.ceil(remaining2/monthlyPay) : null
+          return `
+            <div class="plan-fixed-row">
+              <div class="pfr-icon">${g.icon||'🎯'}</div>
+              <div class="pfr-info">
+                <div class="pfr-name">${g.name}</div>
+                <div class="pfr-meta">${Math.round((g.current/g.target)*100)}% saved${monthsLeft?` · ~${monthsLeft} months to go`:''}</div>
+              </div>
+              <div class="pfr-amount text-emerald">${c(monthlyPay, profCur())}<span class="pfr-freq">/mo</span></div>
+            </div>`
+        }).join('')}
+        <div class="plan-section-note">💡 Change monthly contributions in the <a href="#" id="go-goals-link">Goals</a> page</div>
+      </div>` : `
+      <div class="plan-section-empty" id="add-goals-prompt">
+        <span>🏆 No goals set up yet —</span>
+        <a href="#" id="go-goals-link">add some goals</a> and they'll appear here automatically.
+      </div>`}
+
+      ${loans.length > 0 ? `
+      <div class="plan-section plan-section-debt">
+        <div class="plan-section-header">
+          <div class="psh-title">📉 Debt Repayments <span class="psh-auto-badge">auto</span></div>
+          <div class="psh-total text-red">${c(debtTotal, profCur())}</div>
+        </div>
+        ${loans.map(loan => {
+          const lCur = loanCur(loan)
+          const payInProfile = loanMonthlyInProfileCurrency(state.data, loan)
+          const payInLoan = loan.monthlyPayment || 0
+          const isCross = lCur !== profCur()
+          return `
+            <div class="plan-fixed-row">
+              <div class="pfr-icon">📉</div>
+              <div class="pfr-info">
+                <div class="pfr-name">${loan.name}</div>
+                <div class="pfr-meta">${loan.interestRate > 0 ? loan.interestRate + '% interest' : '0% — interest free ✨'}
+                  ${isCross ? ` · at ${state.data.profile.gbpToEurRate} rate` : ''}</div>
+              </div>
+              <div class="pfr-amount text-red">
+                ${c(payInProfile, profCur())}<span class="pfr-freq">/mo</span>
+                ${isCross ? `<div class="pfr-convert">→ ${c(payInLoan, lCur)} received</div>` : ''}
+              </div>
+            </div>`
+        }).join('')}
+        <div class="plan-section-note">💡 Change monthly payments in the <a href="#" id="go-loans-link">Debt Tracker</a></div>
+      </div>` : ''}
+
+      <div class="plan-summary-card ${over ? 'over' : remaining < income * 0.05 ? 'tight' : 'good'}">
+        <div class="psc-row">
+          <span class="psc-label">Total income</span>
+          <span class="psc-val">${c(income, profCur())}</span>
+        </div>
+        <div class="psc-row">
+          <span class="psc-label">Living expenses</span>
+          <span class="psc-val">− ${c(catTotal, profCur())}</span>
+        </div>
+        ${goalTotal > 0 ? `<div class="psc-row"><span class="psc-label">Goal contributions</span><span class="psc-val">− ${c(goalTotal, profCur())}</span></div>` : ''}
+        ${debtTotal > 0 ? `<div class="psc-row"><span class="psc-label">Debt repayments</span><span class="psc-val">− ${c(debtTotal, profCur())}</span></div>` : ''}
+        <div class="psc-divider"></div>
+        <div class="psc-row psc-result">
+          <span class="psc-label">${remaining >= 0 ? '✅ Unplanned / Free' : '❌ Over income by'}</span>
+          <span class="psc-val ${remaining >= 0 ? 'text-emerald' : 'text-red'}">${c(Math.abs(remaining), profCur())}</span>
+        </div>
+        ${remaining > 0 ? `<div class="psc-tip">💡 Consider routing this to savings or a goal!</div>` : ''}
+        ${over ? `<div class="psc-tip" style="color:var(--red)">⚠️ Reduce some categories or check your income amount.</div>` : ''}
+      </div>
+
     </div>
-    <div class="cat-budget-grid">
-      ${categories.map(cat => {
-        const pctOfSalary = salary > 0 && cat.budget > 0 ? Math.round((cat.budget/salary)*100) : 0
-        return `
-          <div class="cat-budget-row">
-            <div class="cbr-icon" style="cursor:pointer;" data-edit-cat="${cat.id}">${cat.icon}</div>
-            <div class="cbr-info">
-              <div class="cbr-name" style="cursor:pointer;" data-edit-cat="${cat.id}">${cat.name}</div>
-              <div class="cbr-pct">${pctOfSalary>0?`<span>${pctOfSalary}%</span> of income`:'Not allocated'}</div>
-            </div>
-            ${cat.essential ? '<div class="cbr-essential">Essential</div>' : ''}
-            <button class="cbr-edit-btn" data-edit-cat="${cat.id}" title="Edit">✏️</button>
-            <button class="cbr-del-btn" data-del-cat="${cat.id}" title="Delete">🗑️</button>
-            <div class="cbr-input-wrap">
-              <div class="cbr-currency">${profCur()}</div>
-              <input type="number" class="cbr-input" data-cat="${cat.id}" value="${cat.budget||''}" placeholder="0" min="0" step="10">
-            </div>
-          </div>`
-      }).join('')}
-      <button class="add-cat-btn" id="add-cat-btn-2">＋ Add new category</button>
-    </div>`
+
+    <div class="field" style="margin-top:20px;">
+      <label class="field-label">📝 Notes for ${monthLabel(month)}</label>
+      <textarea id="plan-notes" class="field-input" rows="2" placeholder="e.g. Got a bonus, cut entertainment, visiting family…">${draft.notes || ''}</textarea>
+    </div>
+
+    <div style="display:flex;gap:12px;margin-top:8px;">
+      <button class="btn btn-primary" id="save-plan-btn-2">💾 Save ${monthLabel(month)} Plan</button>
+      ${isSaved ? `<button class="btn btn-danger btn-sm" id="delete-plan-btn">Delete plan</button>` : ''}
+    </div>
+  `
 }
 
-// ── Transactions ──────────────────────────────────────────────────────────────
+// ── History ───────────────────────────────────────────────────────────────────
 
-function renderTransactions() {
-  const { categories, transactions } = state.data
-  const { search, category, month } = state.txFilter
-
-  let filtered = transactions.filter(t => {
-    if (category !== 'all' && t.category !== category) return false
-    if (month !== 'all' && getMonthKey(t.date) !== month) return false
-    if (search && !t.description?.toLowerCase().includes(search.toLowerCase())) return false
-    return true
-  }).sort((a, b) => new Date(b.date) - new Date(a.date))
-
-  const allMonths = [...new Set(transactions.map(t => getMonthKey(t.date)))].sort().reverse()
-  const monthTxCount = month !== 'all' ? transactions.filter(t => getMonthKey(t.date) === month).length : 0
-
-  const grouped = {}
-  filtered.forEach(t => {
-    const key = getMonthKey(t.date)
-    if (!grouped[key]) grouped[key] = []
-    grouped[key].push(t)
-  })
+function renderHistory() {
+  const { monthlyBudgets, profile, goals, loans } = state.data
+  const sorted = [...monthlyBudgets].sort((a,b) => b.month.localeCompare(a.month))
 
   return `
     <div class="page-header">
       <div class="page-header-row">
         <div>
-          <div class="page-title">Transactions</div>
-          <div class="page-sub">${filtered.length} shown</div>
+          <div class="page-title">Budget History 📅</div>
+          <div class="page-sub">${sorted.length} saved plan${sorted.length !== 1 ? 's' : ''} — your financial journey in snapshots</div>
         </div>
-        ${month !== 'all' ? `<button class="btn btn-danger btn-sm" id="reset-month-btn">🗑 Reset ${monthLabel(month)}</button>` : ''}
       </div>
     </div>
 
-    <div class="quick-add">
-      <div class="qa-title">Quick Add</div>
-      <div class="qa-fields">
-        <div class="qa-field">
-          <div class="qa-label">Description</div>
-          <input class="qa-input" id="qa-desc" type="text" placeholder="e.g. Coffee, Rent…">
-        </div>
-        <div class="qa-field">
-          <div class="qa-label">Amount</div>
-          <div style="display:flex;gap:4px;">
-            <select class="qa-input" id="qa-currency" style="width:64px;flex-shrink:0;padding:8px 4px;">
-              ${CURRENCIES.map(cur => `<option value="${cur}" ${cur===profCur()?'selected':''}>${cur}</option>`).join('')}
-            </select>
-            <input class="qa-input" id="qa-amount" type="number" placeholder="0.00" min="0" step="0.01" style="flex:1;">
-          </div>
-        </div>
-        <div class="qa-field">
-          <div class="qa-label">Category</div>
-          <select class="qa-input" id="qa-cat">
-            ${categories.map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')}
-          </select>
-        </div>
-        <div class="qa-field">
-          <div class="qa-label">Date</div>
-          <input class="qa-input" id="qa-date" type="date" value="${new Date().toISOString().slice(0,10)}">
-        </div>
-        <div class="qa-field">
-          <div class="qa-label">Type</div>
-          <select class="qa-input" id="qa-type">
-            <option value="expense">Expense</option>
-            <option value="income">Income</option>
-          </select>
-        </div>
-        <button class="qa-submit" id="qa-submit">Add +</button>
-      </div>
-    </div>
-
-    <div class="tx-controls">
-      <input class="tx-search" id="tx-search" type="text" placeholder="Search transactions…" value="${search}">
-      <select class="filter-sel" id="tx-cat-filter">
-        <option value="all">All categories</option>
-        ${categories.map(c => `<option value="${c.id}" ${category===c.id?'selected':''}>${c.icon} ${c.name}</option>`).join('')}
-      </select>
-      <select class="filter-sel" id="tx-month-filter">
-        <option value="all" ${month==='all'?'selected':''}>All months</option>
-        ${allMonths.map(m => `<option value="${m}" ${month===m?'selected':''}>${monthLabelLong(m)}</option>`).join('')}
-      </select>
-    </div>
-
-    ${Object.keys(grouped).length ? `
-      <div class="tx-full-list">
-        ${Object.keys(grouped).sort().reverse().map(m => {
-          const monthTotals = totalsByCurrency(grouped[m], null)
-          const expenseTotals = {}
-          grouped[m].filter(t=>t.type==='expense').forEach(t => {
-            const cur = txCur(t)
-            expenseTotals[cur] = (expenseTotals[cur]||0) + t.amount
-          })
-          const totalStr = Object.entries(expenseTotals).map(([cur,amt])=>'-'+c(amt,cur)).join(' ')
-          return `
-            <div class="tx-month-group">
-              <span>${monthLabelLong(m)}</span>
-              <span class="tx-month-total">${totalStr || c(0, profCur())}</span>
+    ${sorted.length === 0 ? `
+      <div class="empty-state" style="padding:80px 40px">
+        <div class="empty-icon">📅</div>
+        <div class="empty-title">No saved plans yet!</div>
+        <div class="empty-sub">Go to <strong>Month Plan</strong>, fill in your budget, and hit Save. It'll show up here.</div>
+        <button class="btn btn-primary" style="margin-top:20px;" id="go-plan-from-history">Start planning →</button>
+      </div>` :
+    `<div class="history-cards-grid">
+      ${sorted.map(b => {
+        const income = b.income || 0
+        const { catTotal, goalTotal, debtTotal, totalCommitted, remaining } = calcMonthSummary(state.data, b)
+        const isOver = remaining < 0
+        const pct = income > 0 ? Math.min(100, Math.round(totalCommitted/income*100)) : 0
+        const isCurrent = b.month === getCurrentMonthKey()
+        return `
+          <div class="history-card" data-open-plan="${b.month}">
+            <div class="hc-top">
+              <div class="hc-month">${monthLabelLong(b.month)}</div>
+              ${isCurrent ? '<span class="badge-now">now</span>' : ''}
+              <div class="hc-status ${isOver ? 'over' : ''}">${isOver ? '⚠️ Over' : '✅ Balanced'}</div>
             </div>
-            ${grouped[m].map(t => {
-              const cat = categories.find(c=>c.id===t.category)||{icon:'📦',color:'#6b7280',name:t.category}
-              const isForeign = txCur(t) !== profCur()
-              return `
-                <div class="tx-full-item">
-                  <div class="tx-date-badge">${new Date(t.date).toLocaleDateString('en-GB',{month:'short',day:'numeric'})}</div>
-                  <div class="tx-icon-wrap" style="background:${cat.color}22;">${cat.icon}</div>
-                  <div class="tx-info">
-                    <div class="tx-desc">${t.description||cat.name}</div>
-                    <div class="tx-meta">${cat.name}${isForeign?' · <span class="cur-badge">' + txCur(t) + '</span>':''}</div>
-                  </div>
-                  <div class="tx-amount ${t.type}">${t.type==='income'?'+':'-'}${c(t.amount, txCur(t))}</div>
-                  <div class="tx-actions">
-                    <button class="tx-icon-btn del" data-tx-del="${t.id}">🗑️</button>
-                  </div>
-                </div>`
-            }).join('')}`
-        }).join('')}
-      </div>` : `
-      <div class="empty-state">
-        <div class="empty-icon">💳</div>
-        <div class="empty-title">No transactions found</div>
-        <div class="empty-sub">Add your first transaction using the quick form above.</div>
-      </div>`}
+            <div class="hc-income">${c(income, profCur())}</div>
+            <div class="hc-income-label">income</div>
+            <div class="hc-prog-bar"><div class="hc-prog-fill" style="width:${pct}%;background:${isOver?'var(--red)':'var(--primary)'}"></div></div>
+            <div class="hc-breakdown">
+              <span>🏠 ${cs(catTotal,profCur())}</span>
+              ${goalTotal > 0 ? `<span>🏆 ${cs(goalTotal,profCur())}</span>` : ''}
+              ${debtTotal > 0 ? `<span>📉 ${cs(debtTotal,profCur())}</span>` : ''}
+              <span class="${isOver?'text-red':'text-emerald'}">${isOver?'−':'+'} ${cs(Math.abs(remaining),profCur())}</span>
+            </div>
+            ${b.notes ? `<div class="hc-notes">📝 ${b.notes}</div>` : ''}
+          </div>`
+      }).join('')}
+    </div>`}
   `
-}
-
-// ── Forecast ──────────────────────────────────────────────────────────────────
-
-function renderForecast() {
-  const { profile, categories, transactions } = state.data
-  const salary = profile.salaryNet
-  const forecasts = forecastSpending(state.data, 3)
-  const cur = getCurrentMonthKey()
-  const forecastMonths = [addMonths(cur,1), addMonths(cur,2), addMonths(cur,3)]
-  const fTotals = forecastMonths.map((_,i) => Object.values(forecasts).reduce((s,f) => s+(f.forecast[i]||0), 0))
-  const last6 = getLastNMonths(6)
-  const spendByMonth = getSpendingByMonth(transactions)
-  const last6Actual = last6.map(m => spendByMonth[m] || null)
-  const activeCats = categories.filter(c => c.id !== 'savings' && forecasts[c.id]?.avg > 0)
-  const simAdjusted = activeCats.map(c => {
-    const adj = state.simAdjust[c.id] !== undefined ? state.simAdjust[c.id] : 0
-    const baseAvg = forecasts[c.id]?.avg || 0
-    return { ...c, baseAvg, adjusted: Math.max(0, baseAvg * (1 + adj / 100)), adj }
-  })
-  const simTotal = simAdjusted.reduce((s,c) => s+c.adjusted, 0)
-  const simSavings = salary - simTotal
-  const baseTotal = simAdjusted.reduce((s,c) => s+c.baseAvg, 0)
-  const chartLabels = [...last6, ...forecastMonths].map(m => monthLabel(m))
-  const lastActual = last6Actual.filter(v=>v!=null).slice(-1)[0] || 0
-  const chartActualData = [...last6Actual, null, null, null]
-  const chartForecastData = [...last6Actual.slice(0,-1), lastActual, ...fTotals]
-  state._forecastChartData = { chartLabels, chartActualData, chartForecastData, forecastStart: last6.length - 1 }
-
-  return `
-    <div class="page-header">
-      <div class="page-title">Forecast & Simulation</div>
-      <div class="page-sub">Spending predictions based on your historical patterns</div>
-    </div>
-    <div class="forecast-hero mb20">
-      <div class="fh-label">Projected Next 3 Months</div>
-      <div class="fh-title">~${cs(fTotals[0], profCur())}/month based on your trends</div>
-      <div class="fh-sub">Weighted moving average over last ${last6.filter(m=>spendByMonth[m]).length} months of data</div>
-      <div class="fh-months">
-        ${forecastMonths.map((m,i) => {
-          const prev = i===0?(spendByMonth[last6[last6.length-1]]||0):fTotals[i-1]
-          const delta = prev>0?((fTotals[i]-prev)/prev*100).toFixed(1):0
-          return `<div class="fhmc"><div class="fhmc-label">${monthLabel(m)}</div><div class="fhmc-amount">${cs(fTotals[i],profCur())}</div><div class="fhmc-delta ${fTotals[i]>prev?'up':'down'}">${Number(delta)>0?'↑':'↓'} ${Math.abs(delta)}%</div></div>`
-        }).join('')}
-      </div>
-    </div>
-    <div class="card mb20">
-      <div class="card-title">6-Month History + 3-Month Forecast</div>
-      <canvas id="forecast-line-chart" class="chart" style="width:100%;height:220px;"></canvas>
-    </div>
-    <div class="grid-2 mb20">
-      <div class="card">
-        <div class="card-title">Category Forecast Breakdown</div>
-        <table class="forecast-cat-table">
-          <thead><tr><th>Category</th><th>Avg/mo</th><th>Next Month</th><th>Trend</th></tr></thead>
-          <tbody>
-            ${activeCats.map(c => {
-              const f = forecasts[c.id]
-              const tSym = Math.abs(f.trend)<5?'→':f.trend>0?'↑':'↓'
-              const tCls = Math.abs(f.trend)<5?'trend-stable':f.trend>0?'trend-up':'trend-down'
-              return `<tr><td>${c.icon} ${c.name}</td><td>${cs(f.avg,profCur())}</td><td>${cs(f.forecast[0],profCur())}</td><td class="${tCls}">${tSym} ${Math.abs(f.trend).toFixed(0)}/mo</td></tr>`
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-      <div class="scenario-sim">
-        <div class="sim-label">⚗️ Scenario Simulator</div>
-        <div class="sim-sliders">
-          ${simAdjusted.slice(0,6).map(c => `
-            <div class="sim-row">
-              <div class="sim-cat-name">${c.icon} ${c.name}</div>
-              <input type="range" class="sim-slider" data-sim-cat="${c.id}" min="-80" max="80" value="${c.adj}" step="5">
-              <div class="sim-val">${cs(c.adjusted,profCur())}</div>
-              <div class="sim-delta ${c.adj>0?'text-red':c.adj<0?'text-emerald':'text-muted'}">${c.adj!==0?(c.adj>0?'+':'')+c.adj+'%':'±0%'}</div>
-            </div>`).join('')}
-        </div>
-        <div class="sim-result">
-          <div>
-            <div class="sr-label">Projected monthly savings after adjustments</div>
-            <div class="fz12 text-muted">vs ${cs(salary-baseTotal,profCur())} without adjustments</div>
-          </div>
-          <div class="sr-amount ${simSavings>=0?'good':'bad'}">${c(simSavings,profCur())}</div>
-        </div>
-      </div>
-    </div>`
 }
 
 // ── Goals ─────────────────────────────────────────────────────────────────────
 
 function renderGoals() {
-  const { goals } = state.data
+  const { goals, profile } = state.data
   return `
     <div class="page-header">
       <div class="page-header-row">
-        <div><div class="page-title">Savings Goals</div><div class="page-sub">${goals.length} active</div></div>
+        <div><div class="page-title">Savings Goals 🏆</div><div class="page-sub">${goals.length} active goal${goals.length!==1?'s':''}</div></div>
         <button class="btn btn-primary btn-sm" id="add-goal-btn">+ New Goal</button>
       </div>
     </div>
@@ -614,8 +530,8 @@ function renderGoals() {
         const monthsLeft = g.monthlyContribution > 0 && remaining > 0 ? Math.ceil(remaining/g.monthlyContribution) : null
         return `
           <div class="goal-card">
-            <div style="position:absolute;top:0;left:0;right:0;height:3px;background:${g.color||'#10b981'};border-radius:16px 16px 0 0;"></div>
-            <div style="text-align:center;font-size:26px;margin-bottom:6px;">${g.icon||'🎯'}</div>
+            <div style="position:absolute;top:0;left:0;right:0;height:4px;background:${g.color||'#10b981'};border-radius:var(--radius-lg) var(--radius-lg) 0 0;"></div>
+            <div style="text-align:center;font-size:28px;margin-bottom:8px;">${g.icon||'🎯'}</div>
             <div class="goal-name">${g.name}</div>
             ${cur !== profCur() ? `<div style="text-align:center;margin-bottom:4px;"><span class="cur-badge">${cur}</span></div>` : ''}
             <div class="goal-amounts"><strong>${c(g.current,cur)}</strong> of ${c(g.target,cur)}</div>
@@ -627,9 +543,9 @@ function renderGoals() {
               </div>
             </div>
             <div class="goal-stats">
-              <div class="goal-stat"><div class="gstat-val">${cs(remaining,cur)}</div><div class="gstat-lbl">Remaining</div></div>
-              <div class="goal-stat"><div class="gstat-val">${monthsLeft!==null?monthsLeft+' mo':'—'}</div><div class="gstat-lbl">Est. time</div></div>
-              <div class="goal-stat"><div class="gstat-val">${cs(g.monthlyContribution||0,cur)}</div><div class="gstat-lbl">Need/mo</div></div>
+              <div class="goal-stat"><div class="gstat-val">${cs(remaining,cur)}</div><div class="gstat-lbl">Left</div></div>
+              <div class="goal-stat"><div class="gstat-val">${monthsLeft!==null?monthsLeft+' mo':'—'}</div><div class="gstat-lbl">To go</div></div>
+              <div class="goal-stat"><div class="gstat-val">${cs(g.monthlyContribution||0,profCur())}</div><div class="gstat-lbl">Per month</div></div>
             </div>
             <div class="goal-card-actions">
               <button class="goal-action-btn" data-deposit="${g.id}">+ Deposit</button>
@@ -648,27 +564,39 @@ function renderGoals() {
 // ── Loans ─────────────────────────────────────────────────────────────────────
 
 function renderLoans() {
-  const { loans } = state.data
+  const { loans, profile } = state.data
+  const rate = profile.gbpToEurRate || 1
   return `
     <div class="page-header">
       <div class="page-header-row">
-        <div><div class="page-title">Debt Tracker</div><div class="page-sub">Track loans and repayment progress</div></div>
+        <div><div class="page-title">Debt Tracker 📉</div><div class="page-sub">Chipping away at it, one month at a time 💪</div></div>
         <button class="btn btn-primary btn-sm" id="add-loan-btn">+ Add Loan</button>
       </div>
     </div>
+
+    <div class="rate-banner mb20">
+      <span>💱 Exchange rate: <strong>£1 = €${rate.toFixed(4)}</strong></span>
+      <button class="rate-edit-btn" id="edit-rate-btn">Update rate</button>
+    </div>
+
     ${loans.length === 0 ? `
-      <div class="add-loan-card" id="add-loan-card-btn" style="max-width:400px;margin:40px auto;">
-        <div style="font-size:40px;">📉</div>
-        <div style="font-size:15px;font-weight:600;">Add your first loan</div>
-        <div style="font-size:13px;color:var(--text-muted);">Track student loans, credit cards, mortgages…</div>
+      <div class="add-loan-card" id="add-loan-card-btn" style="max-width:420px;margin:40px auto;">
+        <div style="font-size:44px;">📉</div>
+        <div style="font-size:15px;font-weight:700;">Add your first loan</div>
+        <div style="font-size:13px;color:var(--text-muted);">Student loans, credit cards, mortgages…</div>
       </div>` :
     loans.map(loan => {
-      const cur = loanCur(loan)
-      const totalRepaid = loan.payments.reduce((s,p) => s+p.amount, 0)
+      const lCur = loanCur(loan)
+      const isCross = lCur !== profCur()
+      const totalRepaid = (loan.payments||[]).reduce((s,p) => s + (p.amount||0), 0)
       const balance = Math.max(0, loan.totalDebt - totalRepaid)
       const pct = loan.totalDebt > 0 ? totalRepaid/loan.totalDebt : 0
-      const monthsLeft = loan.monthlyPayment > 0 && balance > 0 ? Math.ceil(balance/loan.monthlyPayment) : null
-      const isForeign = cur !== profCur()
+      const payInLoan    = loan.monthlyPayment || 0
+      const payInProfile = loanMonthlyInProfileCurrency(state.data, loan)
+      const monthsLeft   = payInLoan > 0 && balance > 0 ? Math.ceil(balance/payInLoan) : null
+
+      // Total sent in GBP (for cross-currency loans)
+      const totalSentGBP = (loan.payments||[]).reduce((s,p) => s + (p.sentAmount || 0), 0)
 
       return `
         <div class="loan-card mb20">
@@ -678,9 +606,10 @@ function renderLoans() {
               <div class="loan-ring-center"><div class="lrc-pct">${Math.round(pct*100)}%</div><div class="lrc-lbl">repaid</div></div>
             </div>
             <div class="loan-info">
-              <div class="loan-name">${loan.name}${isForeign?` <span class="cur-badge">${cur}</span>`:''}</div>
-              <div class="loan-balance">${c(balance, cur)}</div>
+              <div class="loan-name">${loan.name} ${isCross ? `<span class="cur-badge">${lCur}</span>` : ''}</div>
+              <div class="loan-balance">${c(balance, lCur)}</div>
               <div class="loan-balance-label">remaining balance</div>
+              ${isCross ? `<div class="loan-cross-info">You send <strong>${c(payInProfile, profCur())}/mo</strong> → they receive <strong>${c(payInLoan, lCur)}/mo</strong> at €${rate.toFixed(3)}/£</div>` : ''}
             </div>
             <div style="display:flex;flex-direction:column;gap:6px;margin-left:auto;">
               <button class="btn btn-primary btn-sm" data-pay-loan="${loan.id}">+ Payment</button>
@@ -689,123 +618,157 @@ function renderLoans() {
             </div>
           </div>
           <div class="loan-stats-row">
-            <div class="loan-stat"><div class="lst-val">${cs(loan.totalDebt,cur)}</div><div class="lst-lbl">Original debt</div></div>
-            <div class="loan-stat"><div class="lst-val text-emerald">${cs(totalRepaid,cur)}</div><div class="lst-lbl">Total repaid</div></div>
-            <div class="loan-stat"><div class="lst-val">${cs(loan.monthlyPayment||0,cur)}</div><div class="lst-lbl">Monthly payment</div></div>
-            <div class="loan-stat"><div class="lst-val ${loan.interestRate>0?'text-red':'text-emerald'}">${loan.interestRate>0?loan.interestRate+'%':'0% ✓'}</div><div class="lst-lbl">Interest rate</div></div>
+            <div class="loan-stat"><div class="lst-val">${cs(loan.totalDebt,lCur)}</div><div class="lst-lbl">Original</div></div>
+            <div class="loan-stat"><div class="lst-val text-emerald">${cs(totalRepaid,lCur)}</div><div class="lst-lbl">Repaid</div></div>
+            ${isCross ? `<div class="loan-stat"><div class="lst-val">${cs(totalSentGBP,profCur())}</div><div class="lst-lbl">Sent (${profCur()})</div></div>` : ''}
+            <div class="loan-stat"><div class="lst-val ${loan.interestRate>0?'text-red':'text-emerald'}">${loan.interestRate>0?loan.interestRate+'%':'0% ✓'}</div><div class="lst-lbl">Interest</div></div>
           </div>
-          <div class="loan-progress-bar">
-            <div class="loan-progress-fill" style="width:${Math.round(pct*100)}%;background:${pct>=1?'#10b981':'#ef4444'}"></div>
-          </div>
-          <div class="loan-progress-label"><span>${cs(totalRepaid,cur)} repaid</span><span>${cs(balance,cur)} left</span></div>
-          ${monthsLeft!==null?`<div class="loan-payoff-estimate">🎯 At ${cs(loan.monthlyPayment,cur)}/month, debt-free in <strong>${monthsLeft} month${monthsLeft!==1?'s':''}</strong> (${addMonths(getCurrentMonthKey(),monthsLeft)})</div>`:''}
-          <div class="loan-payments-title">
-            Payment History
-            <span style="font-size:11px;font-weight:500;color:var(--text-muted);">${loan.payments.length} payment${loan.payments.length!==1?'s':''}</span>
-          </div>
-          ${loan.payments.length > 0 ? `
+          <div class="loan-progress-bar"><div class="loan-progress-fill" style="width:${Math.round(pct*100)}%;background:${pct>=1?'#10b981':'var(--primary)'}"></div></div>
+          <div class="loan-progress-label"><span>${cs(totalRepaid,lCur)} repaid</span><span>${cs(balance,lCur)} left</span></div>
+          ${monthsLeft ? `<div class="loan-payoff-estimate">🎯 At ${c(payInLoan,lCur)}/month → debt-free in <strong>${monthsLeft} month${monthsLeft!==1?'s':''}</strong> (${addMonths(getCurrentMonthKey(),monthsLeft)})</div>` : ''}
+          <div class="loan-payments-title">Payment History<span>${(loan.payments||[]).length} payment${(loan.payments||[]).length!==1?'s':''}</span></div>
+          ${(loan.payments||[]).length > 0 ? `
             <div class="loan-payments-list">
-              ${[...loan.payments].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,10).map(p=>`
+              ${[...(loan.payments||[])].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,10).map(p => `
                 <div class="loan-payment-row">
                   <div class="lpr-date">${new Date(p.date).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'2-digit'})}</div>
                   <div class="lpr-note">${p.note||'Payment'}</div>
-                  <div class="lpr-amount">-${c(p.amount,cur)}</div>
+                  ${p.sentAmount ? `<div class="lpr-sent">${c(p.sentAmount,profCur())} sent</div>` : ''}
+                  <div class="lpr-amount">− ${c(p.amount,lCur)}</div>
                   <button class="lpr-del" data-del-payment="${loan.id}|${p.id}">✕</button>
                 </div>`).join('')}
-            </div>` : `<div class="empty-state" style="padding:20px;"><div class="empty-sub">No payments yet.</div></div>`}
+            </div>` : `<div class="empty-state" style="padding:20px"><div class="empty-sub">No payments yet.</div></div>`}
         </div>`
     }).join('')}
   `
 }
 
-// ── Dynamic event listeners ───────────────────────────────────────────────────
+// ── Event listeners ───────────────────────────────────────────────────────────
 
 function attachDynamicListeners() {
-  // Setup prompt
-  document.getElementById('go-setup-btn')?.addEventListener('click', () => navigate('budget'))
+  // Overview
+  document.getElementById('go-plan-btn')?.addEventListener('click', () => navigate('plan'))
+  document.getElementById('go-plan-from-history')?.addEventListener('click', () => navigate('plan'))
 
-  // Dashboard month navigation
-  document.getElementById('dash-prev-month')?.addEventListener('click', () => {
-    state.viewMonth = addMonths(state.viewMonth, -1); render()
+  // Month plan navigation
+  document.getElementById('plan-prev-month')?.addEventListener('click', () => {
+    state.planMonth = addMonths(state.planMonth, -1)
+    state._draftBudget = null
+    render()
   })
-  document.getElementById('dash-next-month')?.addEventListener('click', () => {
-    if (state.viewMonth < getCurrentMonthKey()) { state.viewMonth = addMonths(state.viewMonth, 1); render() }
+  document.getElementById('plan-next-month')?.addEventListener('click', () => {
+    if (state.planMonth < getCurrentMonthKey()) {
+      state.planMonth = addMonths(state.planMonth, 1)
+      state._draftBudget = null
+      render()
+    }
   })
-  document.getElementById('dash-today')?.addEventListener('click', () => {
-    state.viewMonth = getCurrentMonthKey(); render()
-  })
-  // History table rows → jump to that month on dashboard
-  document.querySelectorAll('[data-history-month]').forEach(row => {
-    row.addEventListener('click', () => { state.viewMonth = row.dataset.historyMonth; render() })
+  document.getElementById('plan-today')?.addEventListener('click', () => {
+    state.planMonth = getCurrentMonthKey()
+    state._draftBudget = null
+    render()
   })
 
-  // Dashboard quick add
-  document.getElementById('add-tx-btn-dash')?.addEventListener('click', () => navigate('transactions'))
-
-  // Budget
-  document.getElementById('edit-salary-btn')?.addEventListener('click', openSalaryModal)
-  document.getElementById('set-currency-btn')?.addEventListener('click', openCurrencyModal)
-  document.getElementById('location-badge-btn')?.addEventListener('click', openSalaryModal)
-  document.getElementById('add-cat-btn')?.addEventListener('click', () => openCategoryModal())
-  document.getElementById('add-cat-btn-2')?.addEventListener('click', () => openCategoryModal())
-
-  document.querySelectorAll('[data-rule]').forEach(btn => {
-    btn.addEventListener('click', () => applyRule(btn.dataset.rule))
+  // Income field — update draft in real time
+  document.getElementById('plan-income')?.addEventListener('input', e => {
+    if (state._draftBudget) {
+      state._draftBudget.income = parseFloat(e.target.value) || 0
+      // Re-render progress bar only (avoids losing focus)
+      updatePlanSummary()
+    }
   })
-  document.querySelectorAll('.cbr-input').forEach(input => {
+
+  // Category inputs — update draft on change (blur)
+  document.querySelectorAll('.plan-cat-input').forEach(input => {
     input.addEventListener('change', e => {
-      const cat = state.data.categories.find(c => c.id === e.target.dataset.cat)
-      if (cat) { cat.budget = parseFloat(e.target.value) || 0; saveData(); render() }
+      if (!document.contains(e.target)) return
+      if (!state._draftBudget) return
+      state._draftBudget.allocations[e.target.dataset.cat] = parseFloat(e.target.value) || 0
+      updatePlanSummary()
     })
   })
+
+  // Notes
+  document.getElementById('plan-notes')?.addEventListener('input', e => {
+    if (state._draftBudget) state._draftBudget.notes = e.target.value
+  })
+
+  // Save plan buttons
+  const savePlan = () => {
+    if (!state._draftBudget) return
+    const draft = state._draftBudget
+    draft.savedAt = new Date().toISOString()
+    if (!draft.id) draft.id = uuid()
+    const idx = state.data.monthlyBudgets.findIndex(b => b.month === draft.month)
+    if (idx >= 0) state.data.monthlyBudgets[idx] = draft
+    else state.data.monthlyBudgets.push(draft)
+    // Also sync category template budgets from current month's plan
+    if (draft.month === getCurrentMonthKey()) {
+      state.data.categories.forEach(cat => {
+        cat.budget = draft.allocations[cat.id] || 0
+      })
+    }
+    saveData()
+    showToast(`${monthLabelLong(draft.month)} plan saved! ✅`, 'success')
+    render()
+  }
+  document.getElementById('save-plan-btn')?.addEventListener('click', savePlan)
+  document.getElementById('save-plan-btn-2')?.addEventListener('click', savePlan)
+
+  // Delete plan
+  document.getElementById('delete-plan-btn')?.addEventListener('click', () => {
+    if (confirm(`Delete the plan for ${monthLabelLong(state.planMonth)}?`)) {
+      state.data.monthlyBudgets = state.data.monthlyBudgets.filter(b => b.month !== state.planMonth)
+      state._draftBudget = null
+      saveData(); render()
+    }
+  })
+
+  // Wizard rules
+  document.querySelectorAll('[data-rule]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!state._draftBudget) return
+      const income = state._draftBudget.income || state.data.profile.salaryNet
+      if (!income) { openSalaryModal(); return }
+      const tmpData = JSON.parse(JSON.stringify(state.data))
+      applyAllocationRule(tmpData, btn.dataset.rule, income)
+      tmpData.categories.forEach(cat => {
+        state._draftBudget.allocations[cat.id] = cat.budget
+      })
+      render()
+    })
+  })
+
+  // Category management
+  document.getElementById('add-cat-btn')?.addEventListener('click', () => openCategoryModal())
   document.querySelectorAll('[data-edit-cat]').forEach(el => el.addEventListener('click', () => openCategoryModal(el.dataset.editCat)))
   document.querySelectorAll('[data-del-cat]').forEach(btn => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.delCat
       const cat = state.data.categories.find(c => c.id === id)
-      const txCount = state.data.transactions.filter(t => t.category === id).length
-      if (confirm(`Delete "${cat?.name}"?${txCount>0?` (${txCount} transactions will become uncategorised)`:''}`) ) {
+      if (confirm(`Delete "${cat?.name}"?`)) {
         state.data.categories = state.data.categories.filter(c => c.id !== id)
+        if (state._draftBudget) delete state._draftBudget.allocations[id]
         saveData(); render()
       }
     })
   })
 
-  // Transactions
-  document.getElementById('qa-submit')?.addEventListener('click', addQuickTransaction)
-  document.getElementById('qa-amount')?.addEventListener('keydown', e => { if(e.key==='Enter') addQuickTransaction() })
-  document.getElementById('tx-search')?.addEventListener('input', debounce(e => {
-    if (!document.contains(e.target)) return
-    const val = e.target.value
-    state.txFilter.search = val
-    render()
-    requestAnimationFrame(() => {
-      const el = document.getElementById('tx-search')
-      if (el) { el.focus(); el.setSelectionRange(val.length, val.length) }
+  // History: open plan
+  document.querySelectorAll('[data-open-plan]').forEach(card => {
+    card.addEventListener('click', () => {
+      state.planMonth = card.dataset.openPlan
+      state._draftBudget = null
+      navigate('plan')
     })
-  }, 350))
-  document.getElementById('tx-cat-filter')?.addEventListener('change', e => { state.txFilter.category = e.target.value; render() })
-  document.getElementById('tx-month-filter')?.addEventListener('change', e => { state.txFilter.month = e.target.value; render() })
-  document.querySelectorAll('[data-tx-del]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      state.data.transactions = state.data.transactions.filter(t => t.id !== btn.dataset.txDel)
-      saveData(); render()
-    })
-  })
-  document.getElementById('reset-month-btn')?.addEventListener('click', () => {
-    const m = state.txFilter.month
-    const count = state.data.transactions.filter(t => getMonthKey(t.date) === m).length
-    if (count === 0) return
-    if (confirm(`Delete all ${count} transaction${count!==1?'s':''} from ${monthLabelLong(m)}? This cannot be undone.`)) {
-      state.data.transactions = state.data.transactions.filter(t => getMonthKey(t.date) !== m)
-      saveData(); render()
-    }
   })
 
-  // Forecast sliders
-  document.querySelectorAll('.sim-slider').forEach(slider => {
-    slider.addEventListener('input', e => { state.simAdjust[e.target.dataset.simCat] = parseInt(e.target.value); render() })
-  })
+  // Cross-links
+  document.getElementById('go-goals-link')?.addEventListener('click', e => { e.preventDefault(); navigate('goals') })
+  document.getElementById('go-loans-link')?.addEventListener('click', e => { e.preventDefault(); navigate('loans') })
+
+  // Rate banner
+  document.getElementById('edit-rate-btn')?.addEventListener('click', openRateModal)
 
   // Goals
   document.getElementById('add-goal-btn')?.addEventListener('click', openGoalModal)
@@ -813,7 +776,9 @@ function attachDynamicListeners() {
   document.querySelectorAll('[data-deposit]').forEach(btn => btn.addEventListener('click', () => openDepositModal(btn.dataset.deposit)))
   document.querySelectorAll('[data-edit-goal]').forEach(btn => btn.addEventListener('click', () => openGoalModal(btn.dataset.editGoal)))
   document.querySelectorAll('[data-del-goal]').forEach(btn => {
-    btn.addEventListener('click', () => { if(confirm('Delete this goal?')){state.data.goals=state.data.goals.filter(g=>g.id!==btn.dataset.delGoal);saveData();render()} })
+    btn.addEventListener('click', () => {
+      if (confirm('Delete this goal?')) { state.data.goals = state.data.goals.filter(g => g.id !== btn.dataset.delGoal); saveData(); render() }
+    })
   })
 
   // Loans
@@ -822,77 +787,62 @@ function attachDynamicListeners() {
   document.querySelectorAll('[data-pay-loan]').forEach(btn => btn.addEventListener('click', () => openLoanPaymentModal(btn.dataset.payLoan)))
   document.querySelectorAll('[data-edit-loan]').forEach(btn => btn.addEventListener('click', () => openLoanModal(btn.dataset.editLoan)))
   document.querySelectorAll('[data-del-loan]').forEach(btn => {
-    btn.addEventListener('click', () => { if(confirm('Delete this loan?')){state.data.loans=state.data.loans.filter(l=>l.id!==btn.dataset.delLoan);saveData();render()} })
+    btn.addEventListener('click', () => {
+      if (confirm('Delete this loan?')) { state.data.loans = state.data.loans.filter(l => l.id !== btn.dataset.delLoan); saveData(); render() }
+    })
   })
   document.querySelectorAll('[data-del-payment]').forEach(btn => {
     btn.addEventListener('click', () => {
       const [loanId, payId] = btn.dataset.delPayment.split('|')
       const loan = state.data.loans.find(l => l.id === loanId)
-      if (loan) { loan.payments = loan.payments.filter(p => p.id !== payId); saveData(); render() }
+      if (loan) { loan.payments = (loan.payments||[]).filter(p => p.id !== payId); saveData(); render() }
     })
   })
 
   // Charts
   requestAnimationFrame(() => {
-    if (state.view === 'dashboard') {
-      const barCanvas = document.getElementById('bar-chart')
-      if (barCanvas) {
-        const last6 = getLastNMonths(6)
-        const spendByMonth = getSpendingByMonth(state.data.transactions)
-        const totalBudget = state.data.categories.filter(c=>c.id!=='savings').reduce((s,c)=>s+c.budget,0)
-        drawBarChart(barCanvas, last6.map(m=>monthLabel(m)), [
-          { data: last6.map(m=>spendByMonth[m]||0), color: '#6366f1' },
-          { data: last6.map(()=>totalBudget), color: '#10b98144' },
-        ])
-      }
-      const healthCanvas = document.getElementById('health-ring')
-      if (healthCanvas) {
-        const { score } = calcHealthScore(state.data)
-        const col = score>=80?'#10b981':score>=60?'#3b82f6':score>=40?'#f59e0b':'#ef4444'
-        drawRing(healthCanvas, score/100, col, { lineWidth: 10, padding: 6 })
-      }
-    }
-    if (state.view === 'forecast' && state._forecastChartData) {
-      const { chartLabels, chartActualData, chartForecastData, forecastStart } = state._forecastChartData
-      const fc = document.getElementById('forecast-line-chart')
-      if (fc) drawLineChart(fc, chartLabels, [
-        { data: chartActualData, color: '#10b981', fill: true },
-        { data: chartForecastData, color: '#8b5cf6', dashed: true, dotRadius: 3 }
-      ], { forecastStart })
+    if (state.view === 'overview') {
+      const h = document.getElementById('health-ring')
+      if (h) { const {score} = calcHealthScore(state.data); const col = score>=80?'#10b981':score>=60?'#7c3aed':score>=40?'#f59e0b':'#f43f5e'; drawRing(h, score/100, col, {lineWidth:10,padding:6}) }
     }
     if (state.view === 'goals') {
       state.data.goals.forEach(g => {
         const canvas = document.getElementById(`goal-ring-${g.id}`)
-        if (canvas) drawRing(canvas, Math.min(1,g.current/g.target), g.color||'#10b981', { lineWidth: 10, padding: 6 })
+        if (canvas) drawRing(canvas, Math.min(1,g.current/g.target), g.color||'#10b981', {lineWidth:10,padding:6})
       })
     }
     if (state.view === 'loans') {
       state.data.loans.forEach(loan => {
         const canvas = document.getElementById(`loan-ring-${loan.id}`)
         if (canvas) {
-          const repaid = loan.payments.reduce((s,p)=>s+p.amount,0)
+          const repaid = (loan.payments||[]).reduce((s,p)=>s+p.amount,0)
           const pct = loan.totalDebt > 0 ? Math.min(1, repaid/loan.totalDebt) : 0
-          drawRing(canvas, pct, pct>=1?'#10b981':'#ef4444', { lineWidth: 10, padding: 6 })
+          drawRing(canvas, pct, pct>=1?'#10b981':'#7c3aed', {lineWidth:10,padding:6})
         }
       })
     }
   })
 }
 
-// ── Quick add transaction ─────────────────────────────────────────────────────
+// Update plan summary bars without full re-render (keeps input focus)
+function updatePlanSummary() {
+  if (!state._draftBudget) return
+  const { catTotal, goalTotal, debtTotal, totalCommitted, remaining } = calcMonthSummary(state.data, state._draftBudget)
+  const income = state._draftBudget.income || 0
+  const over   = totalCommitted > income
+  const pct    = income > 0 ? Math.min(100, Math.round(totalCommitted/income*100)) : 0
 
-function addQuickTransaction() {
-  const desc     = document.getElementById('qa-desc')?.value.trim()
-  const amount   = parseFloat(document.getElementById('qa-amount')?.value)
-  const currency = document.getElementById('qa-currency')?.value || profCur()
-  const cat      = document.getElementById('qa-cat')?.value
-  const date     = document.getElementById('qa-date')?.value
-  const type     = document.getElementById('qa-type')?.value
-  if (!amount || isNaN(amount) || amount <= 0) { document.getElementById('qa-amount')?.focus(); return }
-  state.data.transactions.push({ id: uuid(), description: desc||'', amount, currency, category: cat, date, type: type||'expense' })
-  saveData()
-  state.txFilter.month = getMonthKey(date)
-  render()
+  const fill = document.querySelector('.plan-progress-fill')
+  if (fill) {
+    fill.style.width = pct + '%'
+    fill.className = `plan-progress-fill ${over ? 'over' : pct > 95 ? 'near' : ''}`
+  }
+  const labels = document.querySelector('.plan-progress-labels')
+  if (labels) {
+    labels.innerHTML = `
+      <span>${cs(totalCommitted, profCur())} planned</span>
+      <span class="${over ? 'text-red' : 'text-emerald'}">${over ? '⚠️ ' + cs(Math.abs(remaining), profCur()) + ' over' : '✅ ' + cs(remaining, profCur()) + ' free'}</span>`
+  }
 }
 
 // ── Modals ────────────────────────────────────────────────────────────────────
@@ -900,7 +850,7 @@ function addQuickTransaction() {
 function openModal(html) {
   const root = document.getElementById('modal-root')
   root.innerHTML = `<div class="modal-backdrop" id="modal-bg">${html}</div>`
-  root.querySelector('#modal-bg').addEventListener('click', e => { if(e.target.id==='modal-bg') closeModal() })
+  root.querySelector('#modal-bg').addEventListener('click', e => { if (e.target.id==='modal-bg') closeModal() })
 }
 function closeModal() { document.getElementById('modal-root').innerHTML = '' }
 
@@ -908,38 +858,39 @@ function currencySelect(id, selected) {
   return `<select class="field-input" id="${id}">${CURRENCIES.map(cur=>`<option value="${cur}" ${cur===selected?'selected':''}>${cur}</option>`).join('')}</select>`
 }
 
-// ── Salary modal ──────────────────────────────────────────────────────────────
+// ── Salary / profile modal ────────────────────────────────────────────────────
 
 function openSalaryModal() {
   const { profile } = state.data
-  const salary = profile.salaryNet || ''
   const locations = ['London','Manchester','Edinburgh','Bristol','Birmingham','Paris','Amsterdam','Berlin','Dublin','New York','Remote']
-
   openModal(`
     <div class="modal">
-      <div class="modal-header"><div class="modal-title">Salary & Location</div><button class="modal-close" id="mc">×</button></div>
+      <div class="modal-header"><div class="modal-title">💼 Salary & Settings</div><button class="modal-close" id="mc">×</button></div>
       <div class="salary-input-hero">
-        <div class="sih-icon">💼</div>
-        <div class="sih-label">Monthly Net Take-Home</div>
-        <input class="salary-big-input" id="salary-input" type="number" value="${salary}" placeholder="0" autofocus>
+        <div class="sih-icon">💰</div>
+        <div class="sih-label">Default Monthly Net (can vary each month)</div>
+        <input class="salary-big-input" id="salary-input" type="number" value="${profile.salaryNet||''}" placeholder="0" autofocus>
       </div>
       <div class="salary-divider">50/30/20 Preview</div>
-      <div id="rule-preview">${renderRulePreview(salary||0, profile.currency)}</div>
+      <div id="rule-preview">${renderRulePreview(profile.salaryNet||0, profile.currency)}</div>
       <div class="field-row" style="margin-top:16px;">
-        <div class="field"><label class="field-label">Your name</label><input class="field-input" id="name-input" type="text" value="${profile.name}" placeholder="e.g. Elena"></div>
-        <div class="field"><label class="field-label">City / Location</label>
+        <div class="field"><label class="field-label">Your name</label><input class="field-input" id="name-input" value="${profile.name}" placeholder="e.g. Elena"></div>
+        <div class="field"><label class="field-label">City</label>
           <select class="field-input" id="location-input">
             ${locations.map(l=>`<option value="${l}" ${l===profile.location?'selected':''}>${l}</option>`).join('')}
             <option value="${profile.location||''}" ${!locations.includes(profile.location)?'selected':''}>Other</option>
           </select>
         </div>
       </div>
+      <div class="field-row">
+        <div class="field"><label class="field-label">Base Currency</label>${currencySelect('currency-select', profile.currency)}</div>
+        <div class="field"><label class="field-label">GBP → EUR Rate</label><input class="field-input" id="rate-input" type="number" step="0.001" value="${profile.gbpToEurRate||1.17}" placeholder="1.17"></div>
+      </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="mc2">Cancel</button>
         <button class="btn btn-primary" id="save-salary-btn">Save</button>
       </div>
     </div>`)
-
   document.getElementById('mc')?.addEventListener('click', closeModal)
   document.getElementById('mc2')?.addEventListener('click', closeModal)
   document.getElementById('salary-input')?.addEventListener('input', e => {
@@ -948,10 +899,12 @@ function openSalaryModal() {
   document.getElementById('save-salary-btn')?.addEventListener('click', () => {
     const val = parseFloat(document.getElementById('salary-input').value)
     if (val > 0) {
-      state.data.profile.salaryNet = val
-      state.data.profile.name = document.getElementById('name-input').value.trim()
-      state.data.profile.location = document.getElementById('location-input').value
-      state.data.profile.updatedAt = new Date().toISOString()
+      state.data.profile.salaryNet   = val
+      state.data.profile.name        = document.getElementById('name-input').value.trim()
+      state.data.profile.location    = document.getElementById('location-input').value
+      state.data.profile.currency    = document.getElementById('currency-select').value
+      state.data.profile.gbpToEurRate = parseFloat(document.getElementById('rate-input').value) || 1.17
+      state.data.profile.updatedAt   = new Date().toISOString()
       saveData(); closeModal(); render()
     }
   })
@@ -959,28 +912,39 @@ function openSalaryModal() {
 
 function renderRulePreview(salary, currency='£') {
   return `<div class="rule-preview">
-    <div class="rule-card needs"><div class="rc-label">Needs</div><div class="rc-pct" style="color:#92400e">50%</div><div class="rc-amount">${c(salary*.5,currency)}</div></div>
+    <div class="rule-card needs"><div class="rc-label">Needs</div><div class="rc-pct" style="color:#5b21b6">50%</div><div class="rc-amount">${c(salary*.5,currency)}</div></div>
     <div class="rule-card wants"><div class="rc-label">Wants</div><div class="rc-pct" style="color:#1d4ed8">30%</div><div class="rc-amount">${c(salary*.3,currency)}</div></div>
     <div class="rule-card saves"><div class="rc-label">Savings</div><div class="rc-pct" style="color:#047857">20%</div><div class="rc-amount">${c(salary*.2,currency)}</div></div>
   </div>`
 }
 
-function openCurrencyModal() {
-  const cur = profCur()
+// ── Rate modal ────────────────────────────────────────────────────────────────
+
+function openRateModal() {
+  const rate = state.data.profile.gbpToEurRate || 1.17
   openModal(`
-    <div class="modal" style="max-width:340px;">
-      <div class="modal-header"><div class="modal-title">Base Currency</div><button class="modal-close" id="mc">×</button></div>
-      <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">This sets your main currency. Individual transactions, goals and loans can each use a different currency.</p>
-      <div class="field"><label class="field-label">Currency Symbol</label>${currencySelect('currency-select', cur)}</div>
+    <div class="modal" style="max-width:380px;">
+      <div class="modal-header"><div class="modal-title">💱 GBP → EUR Rate</div><button class="modal-close" id="mc">×</button></div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">This rate is used to calculate how many euros your pound payments produce when repaying your loan.</p>
+      <div class="field"><label class="field-label">Current rate (£1 = €?)</label>
+        <input class="field-input" id="rate-inp" type="number" step="0.001" value="${rate}" placeholder="1.17" autofocus>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);">Example: £300 × ${rate.toFixed(3)} = €${(300*rate).toFixed(0)}</div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" id="mc">Cancel</button>
-        <button class="btn btn-primary" id="save-cur">Save</button>
+        <button class="btn btn-secondary" id="mc2">Cancel</button>
+        <button class="btn btn-primary" id="save-rate">Save Rate</button>
       </div>
     </div>`)
-  document.querySelectorAll('#mc').forEach(b=>b.addEventListener('click',closeModal))
-  document.getElementById('save-cur')?.addEventListener('click',()=>{
-    state.data.profile.currency = document.getElementById('currency-select').value
-    saveData(); closeModal(); render()
+  document.getElementById('mc')?.addEventListener('click', closeModal)
+  document.getElementById('mc2')?.addEventListener('click', closeModal)
+  document.getElementById('rate-inp')?.addEventListener('input', e => {
+    const r = parseFloat(e.target.value) || 1
+    const preview = document.querySelector('[style*="Example"]')
+    if (preview) preview.textContent = `Example: £300 × ${r.toFixed(3)} = €${(300*r).toFixed(0)}`
+  })
+  document.getElementById('save-rate')?.addEventListener('click', () => {
+    const r = parseFloat(document.getElementById('rate-inp').value)
+    if (r > 0) { state.data.profile.gbpToEurRate = r; saveData(); closeModal(); render() }
   })
 }
 
@@ -988,119 +952,111 @@ function openCurrencyModal() {
 
 function openCategoryModal(editId) {
   const existing = editId ? state.data.categories.find(c => c.id === editId) : null
-  const icons = ['🏠','🍽️','🚌','💊','⚡','🛍️','🎬','📱','📚','🏦','📦','☕','🚗','✈️','🎵','🍺','🏋️','💈','🐾','🎮','🧴','🎁','🍕','🛒','🧾','💡','🏥','🎓']
-  const colors = ['#6366f1','#f59e0b','#3b82f6','#10b981','#f97316','#ec4899','#8b5cf6','#14b8a6','#ef4444','#06b6d4','#84cc16','#6b7280']
+  const icons  = ['🏠','🍽️','🚌','💊','⚡','🛍️','🎬','📱','📚','📦','☕','🚗','✈️','🎵','🍺','🏋️','💈','🐾','🎮','🧴','🎁','🍕','🛒','💡','🏥','🎓','🐕','🌱','🎨','💇']
+  const colors = ['#7c3aed','#f97316','#0ea5e9','#10b981','#f59e0b','#f43f5e','#8b5cf6','#14b8a6','#ef4444','#3b82f6','#84cc16','#94a3b8']
   let selIcon = existing?.icon || '📦'
-  let selColor = existing?.color || '#6366f1'
-
+  let selColor = existing?.color || '#7c3aed'
   openModal(`
     <div class="modal">
       <div class="modal-header"><div class="modal-title">${existing?'Edit Category':'New Category'}</div><button class="modal-close" id="mc">×</button></div>
-      <div class="field"><label class="field-label">Name</label><input class="field-input" id="cat-name" type="text" value="${existing?.name||''}" placeholder="e.g. Gym, Pets…" autofocus></div>
+      <div class="field"><label class="field-label">Name</label><input class="field-input" id="cat-name" value="${existing?.name||''}" placeholder="e.g. Gym, Pets…" autofocus></div>
       <div class="field-row">
-        <div class="field"><label class="field-label">Essential?</label><select class="field-input" id="cat-essential"><option value="0" ${!existing?.essential?'selected':''}>No (Want)</option><option value="1" ${existing?.essential?'selected':''}>Yes (Need)</option></select></div>
-        <div class="field"><label class="field-label">Starting Budget</label><input class="field-input" id="cat-budget" type="number" value="${existing?.budget||''}" placeholder="0"></div>
+        <div class="field"><label class="field-label">Type</label><select class="field-input" id="cat-essential"><option value="0" ${!existing?.essential?'selected':''}>Want 😊</option><option value="1" ${existing?.essential?'selected':''}>Need 🏠</option></select></div>
+        <div class="field"><label class="field-label">Default Budget</label><input class="field-input" id="cat-budget" type="number" value="${existing?.budget||''}" placeholder="0"></div>
       </div>
       <div class="field"><label class="field-label">Icon</label>
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;" id="icon-picker">
-          ${icons.map(ic=>`<span data-icon="${ic}" style="font-size:20px;cursor:pointer;padding:6px;border-radius:8px;border:2px solid ${ic===selIcon?'#10b981':'transparent'}">${ic}</span>`).join('')}
+          ${icons.map(ic=>`<span data-icon="${ic}" style="font-size:20px;cursor:pointer;padding:6px;border-radius:8px;border:2px solid ${ic===selIcon?'var(--primary)':'transparent'}">${ic}</span>`).join('')}
         </div>
       </div>
-      <div class="field"><label class="field-label">Color</label>
+      <div class="field"><label class="field-label">Colour</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;" id="color-picker">
-          ${colors.map(c=>`<div data-color="${c}" style="width:26px;height:26px;border-radius:50%;background:${c};cursor:pointer;border:3px solid ${c===selColor?'#0f172a':'transparent'}"></div>`).join('')}
+          ${colors.map(co=>`<div data-color="${co}" style="width:26px;height:26px;border-radius:50%;background:${co};cursor:pointer;border:3px solid ${co===selColor?'#1a0f2e':'transparent'}"></div>`).join('')}
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" id="mc2">Cancel</button>
-        <button class="btn btn-primary" id="save-cat-btn">${existing?'Update':'Add Category'}</button>
-      </div>
+      <div class="modal-footer"><button class="btn btn-secondary" id="mc2">Cancel</button><button class="btn btn-primary" id="save-cat-btn">${existing?'Update':'Add'}</button></div>
     </div>`)
-
-  document.getElementById('mc')?.addEventListener('click',closeModal)
-  document.getElementById('mc2')?.addEventListener('click',closeModal)
-  document.querySelectorAll('#icon-picker span').forEach(el=>{el.addEventListener('click',()=>{document.querySelectorAll('#icon-picker span').forEach(e=>e.style.borderColor='transparent');el.style.borderColor='#10b981';selIcon=el.dataset.icon})})
-  document.querySelectorAll('#color-picker div').forEach(el=>{el.addEventListener('click',()=>{document.querySelectorAll('#color-picker div').forEach(e=>e.style.borderColor='transparent');el.style.borderColor='#0f172a';selColor=el.dataset.color})})
-  document.getElementById('save-cat-btn')?.addEventListener('click',()=>{
-    const name=document.getElementById('cat-name').value.trim()
-    if(!name) return
-    const budget=parseFloat(document.getElementById('cat-budget').value)||0
-    const essential=document.getElementById('cat-essential').value==='1'
-    if(existing){Object.assign(existing,{name,icon:selIcon,color:selColor,essential,budget})}
-    else{state.data.categories.push({id:'cat_'+uuid().slice(0,8),name,icon:selIcon,color:selColor,essential,budget})}
-    saveData();closeModal();render()
+  document.getElementById('mc')?.addEventListener('click', closeModal)
+  document.getElementById('mc2')?.addEventListener('click', closeModal)
+  document.querySelectorAll('#icon-picker span').forEach(el=>{el.addEventListener('click',()=>{document.querySelectorAll('#icon-picker span').forEach(e=>e.style.borderColor='transparent');el.style.borderColor='var(--primary)';selIcon=el.dataset.icon})})
+  document.querySelectorAll('#color-picker div').forEach(el=>{el.addEventListener('click',()=>{document.querySelectorAll('#color-picker div').forEach(e=>e.style.borderColor='transparent');el.style.borderColor='#1a0f2e';selColor=el.dataset.color})})
+  document.getElementById('save-cat-btn')?.addEventListener('click', () => {
+    const name = document.getElementById('cat-name').value.trim()
+    if (!name) return
+    const budget = parseFloat(document.getElementById('cat-budget').value)||0
+    const essential = document.getElementById('cat-essential').value==='1'
+    if (existing) Object.assign(existing, {name, icon:selIcon, color:selColor, essential, budget})
+    else state.data.categories.push({id:'cat_'+uuid().slice(0,8), name, icon:selIcon, color:selColor, essential, budget})
+    saveData(); closeModal(); render()
   })
 }
 
-// ── Goal modal ────────────────────────────────────────────────────────────────
+// ── Goal modals ───────────────────────────────────────────────────────────────
 
 function openGoalModal(editId) {
   const existing = editId ? state.data.goals.find(g=>g.id===editId) : null
-  const icons = ['🎯','🏖️','🏠','🚗','🎓','✈️','💍','🏋️','🛡️','🎸','💻','🌍']
-  const colors = ['#10b981','#6366f1','#f59e0b','#ef4444','#3b82f6','#8b5cf6','#ec4899','#14b8a6']
-  let selIcon = existing?.icon || '🎯'
-  let selColor = existing?.color || '#10b981'
-
+  const icons  = ['🎯','🏖️','🏠','🚗','🎓','✈️','💍','🏋️','🛡️','🎸','💻','🌍','🐕','🎨','🏄']
+  const colors = ['#10b981','#7c3aed','#f59e0b','#f43f5e','#3b82f6','#8b5cf6','#ec4899','#14b8a6']
+  let selIcon = existing?.icon||'🎯', selColor = existing?.color||'#10b981'
   openModal(`
     <div class="modal">
-      <div class="modal-header"><div class="modal-title">${existing?'Edit Goal':'New Goal'}</div><button class="modal-close" id="mc">×</button></div>
+      <div class="modal-header"><div class="modal-title">${existing?'Edit Goal':'New Goal 🎯'}</div><button class="modal-close" id="mc">×</button></div>
       <div class="field-row">
-        <div class="field"><label class="field-label">Goal Name</label><input class="field-input" id="g-name" type="text" value="${existing?.name||''}" placeholder="Emergency Fund" autofocus></div>
+        <div class="field"><label class="field-label">Goal Name</label><input class="field-input" id="g-name" value="${existing?.name||''}" placeholder="Emergency Fund" autofocus></div>
         <div class="field"><label class="field-label">Currency</label>${currencySelect('g-currency', existing?.currency||profCur())}</div>
       </div>
       <div class="field-row">
         <div class="field"><label class="field-label">Target Amount</label><input class="field-input" id="g-target" type="number" value="${existing?.target||''}" placeholder="5000"></div>
-        <div class="field"><label class="field-label">Current Saved</label><input class="field-input" id="g-current" type="number" value="${existing?.current||''}" placeholder="0"></div>
+        <div class="field"><label class="field-label">Already Saved</label><input class="field-input" id="g-current" type="number" value="${existing?.current||''}" placeholder="0"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label class="field-label">Monthly Contribution</label><input class="field-input" id="g-monthly" type="number" value="${existing?.monthlyContribution||''}" placeholder="200"></div>
+        <div class="field"><label class="field-label">Monthly Contribution</label><input class="field-input" id="g-monthly" type="number" value="${existing?.monthlyContribution||''}" placeholder="200"><div class="field-hint">This auto-appears in your Month Plan budget</div></div>
         <div class="field"><label class="field-label">Deadline (optional)</label><input class="field-input" id="g-deadline" type="date" value="${existing?.deadline||''}"></div>
       </div>
       <div class="field"><label class="field-label">Icon</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;" id="gicon-picker">
-          ${icons.map(ic=>`<span data-icon="${ic}" style="font-size:22px;cursor:pointer;padding:6px;border-radius:8px;border:2px solid ${ic===selIcon?'#10b981':'transparent'}">${ic}</span>`).join('')}
+          ${icons.map(ic=>`<span data-icon="${ic}" style="font-size:22px;cursor:pointer;padding:6px;border-radius:8px;border:2px solid ${ic===selIcon?'var(--primary)':'transparent'}">${ic}</span>`).join('')}
         </div>
       </div>
-      <div class="field"><label class="field-label">Color</label>
+      <div class="field"><label class="field-label">Colour</label>
         <div style="display:flex;gap:8px;margin-top:6px;" id="gcolor-picker">
-          ${colors.map(c=>`<div data-color="${c}" style="width:24px;height:24px;border-radius:50%;background:${c};cursor:pointer;border:3px solid ${c===selColor?'#0f172a':'transparent'}"></div>`).join('')}
+          ${colors.map(co=>`<div data-color="${co}" style="width:24px;height:24px;border-radius:50%;background:${co};cursor:pointer;border:3px solid ${co===selColor?'#1a0f2e':'transparent'}"></div>`).join('')}
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" id="mc2">Cancel</button>
-        <button class="btn btn-primary" id="save-goal-btn">${existing?'Update':'Create'}</button>
-      </div>
+      <div class="modal-footer"><button class="btn btn-secondary" id="mc2">Cancel</button><button class="btn btn-primary" id="save-goal-btn">${existing?'Update':'Create Goal'}</button></div>
     </div>`)
-
-  document.getElementById('mc')?.addEventListener('click',closeModal)
-  document.getElementById('mc2')?.addEventListener('click',closeModal)
-  document.querySelectorAll('#gicon-picker span').forEach(el=>{el.addEventListener('click',()=>{document.querySelectorAll('#gicon-picker span').forEach(e=>e.style.borderColor='transparent');el.style.borderColor='#10b981';selIcon=el.dataset.icon})})
-  document.querySelectorAll('#gcolor-picker div').forEach(el=>{el.addEventListener('click',()=>{document.querySelectorAll('#gcolor-picker div').forEach(e=>e.style.borderColor='transparent');el.style.borderColor='#0f172a';selColor=el.dataset.color})})
-  document.getElementById('save-goal-btn')?.addEventListener('click',()=>{
+  document.getElementById('mc')?.addEventListener('click', closeModal)
+  document.getElementById('mc2')?.addEventListener('click', closeModal)
+  document.querySelectorAll('#gicon-picker span').forEach(el=>{el.addEventListener('click',()=>{document.querySelectorAll('#gicon-picker span').forEach(e=>e.style.borderColor='transparent');el.style.borderColor='var(--primary)';selIcon=el.dataset.icon})})
+  document.querySelectorAll('#gcolor-picker div').forEach(el=>{el.addEventListener('click',()=>{document.querySelectorAll('#gcolor-picker div').forEach(e=>e.style.borderColor='transparent');el.style.borderColor='#1a0f2e';selColor=el.dataset.color})})
+  document.getElementById('save-goal-btn')?.addEventListener('click', () => {
     const name=document.getElementById('g-name').value.trim()
     const target=parseFloat(document.getElementById('g-target').value)
     if(!name||!target) return
     const goal={id:existing?.id||uuid(),name,target,current:parseFloat(document.getElementById('g-current').value)||0,monthlyContribution:parseFloat(document.getElementById('g-monthly').value)||0,deadline:document.getElementById('g-deadline').value||null,icon:selIcon,color:selColor,currency:document.getElementById('g-currency').value}
     if(existing){const idx=state.data.goals.findIndex(g=>g.id===existing.id);state.data.goals[idx]=goal}
     else state.data.goals.push(goal)
-    saveData();closeModal();render()
+    saveData(); closeModal(); render()
   })
 }
 
 function openDepositModal(goalId) {
   const goal = state.data.goals.find(g=>g.id===goalId)
   if (!goal) return
-  const cur = goalCur(goal)
+  const gCur = goalCur(goal)
   openModal(`
     <div class="modal" style="max-width:360px;">
       <div class="modal-header"><div class="modal-title">${goal.icon} Deposit to ${goal.name}</div><button class="modal-close" id="mc">×</button></div>
-      <div class="field"><label class="field-label">Amount (${cur})</label><input class="field-input" id="dep-amt" type="number" placeholder="0.00" autofocus></div>
-      <div style="font-size:12px;color:var(--text-muted);margin-top:-8px;">${c(goal.current,cur)} / ${c(goal.target,cur)}</div>
-      <div class="modal-footer"><button class="btn btn-secondary" id="mc2">Cancel</button><button class="btn btn-primary" id="save-dep">Add</button></div>
+      <div class="field"><label class="field-label">Amount (${gCur})</label><input class="field-input" id="dep-amt" type="number" placeholder="0.00" autofocus></div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:-8px;">${c(goal.current,gCur)} / ${c(goal.target,gCur)}</div>
+      <div class="modal-footer"><button class="btn btn-secondary" id="mc2">Cancel</button><button class="btn btn-primary" id="save-dep">Add 🎉</button></div>
     </div>`)
-  document.getElementById('mc')?.addEventListener('click',closeModal)
-  document.getElementById('mc2')?.addEventListener('click',closeModal)
-  document.getElementById('save-dep')?.addEventListener('click',()=>{const amt=parseFloat(document.getElementById('dep-amt').value);if(amt>0){goal.current=Math.min(goal.target,goal.current+amt);saveData();closeModal();render()}})
+  document.getElementById('mc')?.addEventListener('click', closeModal)
+  document.getElementById('mc2')?.addEventListener('click', closeModal)
+  document.getElementById('save-dep')?.addEventListener('click', () => {
+    const amt=parseFloat(document.getElementById('dep-amt').value)
+    if(amt>0){goal.current=Math.min(goal.target,goal.current+amt);saveData();closeModal();render()}
+  })
 }
 
 // ── Loan modals ───────────────────────────────────────────────────────────────
@@ -1109,116 +1065,114 @@ function openLoanModal(editId) {
   const existing = editId ? state.data.loans.find(l=>l.id===editId) : null
   openModal(`
     <div class="modal">
-      <div class="modal-header"><div class="modal-title">${existing?'Edit Loan':'New Loan'}</div><button class="modal-close" id="mc">×</button></div>
+      <div class="modal-header"><div class="modal-title">${existing?'Edit Loan':'New Loan 📉'}</div><button class="modal-close" id="mc">×</button></div>
       <div class="field-row">
-        <div class="field"><label class="field-label">Loan Name</label><input class="field-input" id="l-name" type="text" value="${existing?.name||''}" placeholder="Student Loan, Credit Card…" autofocus></div>
-        <div class="field"><label class="field-label">Currency</label>${currencySelect('l-currency', existing?.currency||profCur())}</div>
+        <div class="field"><label class="field-label">Loan Name</label><input class="field-input" id="l-name" value="${existing?.name||''}" placeholder="Student Loan…" autofocus></div>
+        <div class="field"><label class="field-label">Loan Currency</label>${currencySelect('l-currency', existing?.currency||profCur())}</div>
       </div>
       <div class="field-row">
         <div class="field"><label class="field-label">Total Debt</label><input class="field-input" id="l-total" type="number" value="${existing?.totalDebt||''}" placeholder="50000"></div>
-        <div class="field"><label class="field-label">Monthly Payment</label><input class="field-input" id="l-monthly" type="number" value="${existing?.monthlyPayment||''}" placeholder="500"></div>
+        <div class="field"><label class="field-label">Monthly Payment (in loan currency)</label><input class="field-input" id="l-monthly" type="number" value="${existing?.monthlyPayment||''}" placeholder="500"><div class="field-hint">Auto-shown in Month Plan</div></div>
       </div>
       <div class="field-row">
-        <div class="field"><label class="field-label">Interest Rate (%)</label><input class="field-input" id="l-interest" type="number" value="${existing?.interestRate||0}" placeholder="0" step="0.1"><div class="field-hint">Set to 0 for interest-free</div></div>
+        <div class="field"><label class="field-label">Interest Rate (%)</label><input class="field-input" id="l-interest" type="number" value="${existing?.interestRate||0}" placeholder="0" step="0.1"><div class="field-hint">0 for interest-free</div></div>
         <div class="field"><label class="field-label">Start Date</label><input class="field-input" id="l-start" type="date" value="${existing?.startDate||new Date().toISOString().slice(0,10)}"></div>
       </div>
       <div class="modal-footer"><button class="btn btn-secondary" id="mc2">Cancel</button><button class="btn btn-primary" id="save-loan-btn">${existing?'Update':'Add Loan'}</button></div>
     </div>`)
-
-  document.getElementById('mc')?.addEventListener('click',closeModal)
-  document.getElementById('mc2')?.addEventListener('click',closeModal)
-  document.getElementById('save-loan-btn')?.addEventListener('click',()=>{
+  document.getElementById('mc')?.addEventListener('click', closeModal)
+  document.getElementById('mc2')?.addEventListener('click', closeModal)
+  document.getElementById('save-loan-btn')?.addEventListener('click', () => {
     const name=document.getElementById('l-name').value.trim()
     const totalDebt=parseFloat(document.getElementById('l-total').value)
     if(!name||!totalDebt) return
     const loan={id:existing?.id||uuid(),name,totalDebt,monthlyPayment:parseFloat(document.getElementById('l-monthly').value)||0,interestRate:parseFloat(document.getElementById('l-interest').value)||0,startDate:document.getElementById('l-start').value,currency:document.getElementById('l-currency').value,payments:existing?.payments||[]}
     if(existing){const idx=state.data.loans.findIndex(l=>l.id===existing.id);state.data.loans[idx]=loan}
     else state.data.loans.push(loan)
-    saveData();closeModal();render()
+    saveData(); closeModal(); render()
   })
 }
 
 function openLoanPaymentModal(loanId) {
   const loan = state.data.loans.find(l=>l.id===loanId)
   if (!loan) return
-  const cur = loanCur(loan)
-  const repaid = loan.payments.reduce((s,p)=>s+p.amount,0)
+  const lCur = loanCur(loan)
+  const pCur = profCur()
+  const isCross = lCur !== pCur
+  const rate = state.data.profile.gbpToEurRate || 1
+  const repaid = (loan.payments||[]).reduce((s,p)=>s+p.amount,0)
   const balance = Math.max(0, loan.totalDebt-repaid)
   openModal(`
-    <div class="modal" style="max-width:380px;">
-      <div class="modal-header"><div class="modal-title">📉 Payment — ${loan.name}</div><button class="modal-close" id="mc">×</button></div>
-      <div style="text-align:center;padding:8px 0 16px;">
-        <div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Current Balance</div>
-        <div style="font-size:32px;font-weight:800;color:var(--red);letter-spacing:-1px;">${c(balance,cur)}</div>
+    <div class="modal" style="max-width:420px;">
+      <div class="modal-header"><div class="modal-title">📉 Record Payment — ${loan.name}</div><button class="modal-close" id="mc">×</button></div>
+      <div style="text-align:center;padding:10px 0 18px;">
+        <div style="font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Remaining Balance</div>
+        <div style="font-size:36px;font-weight:900;color:var(--primary);letter-spacing:-1.5px;">${c(balance, lCur)}</div>
       </div>
-      <div class="field"><label class="field-label">Payment Amount (${cur})</label><input class="field-input" id="pay-amt" type="number" placeholder="${loan.monthlyPayment||''}" value="${loan.monthlyPayment||''}" autofocus></div>
+      ${isCross ? `
+      <div class="cross-currency-info mb16">
+        💱 You send <strong>${pCur}</strong> → loan receives <strong>${lCur}</strong> at rate ${rate.toFixed(4)}
+      </div>` : ''}
       <div class="field-row">
+        <div class="field">
+          <label class="field-label">${isCross ? `Amount Sent (${pCur})` : `Payment Amount (${lCur})`}</label>
+          <input class="field-input" id="pay-sent" type="number" placeholder="${loan.monthlyPayment ? (isCross ? (loan.monthlyPayment/rate).toFixed(0) : loan.monthlyPayment) : ''}" value="${loan.monthlyPayment ? (isCross ? (loan.monthlyPayment/rate).toFixed(0) : loan.monthlyPayment) : ''}" autofocus>
+          ${isCross ? `<div class="field-hint" id="conversion-preview">= ${c(loan.monthlyPayment||0, lCur)} received</div>` : ''}
+        </div>
         <div class="field"><label class="field-label">Date</label><input class="field-input" id="pay-date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
-        <div class="field"><label class="field-label">Note</label><input class="field-input" id="pay-note" type="text" placeholder="Monthly payment…"></div>
       </div>
-      <div class="modal-footer"><button class="btn btn-secondary" id="mc2">Cancel</button><button class="btn btn-primary" id="save-pay-btn">Record Payment</button></div>
+      <div class="field"><label class="field-label">Note (optional)</label><input class="field-input" id="pay-note" placeholder="Monthly payment…"></div>
+      <div class="modal-footer"><button class="btn btn-secondary" id="mc2">Cancel</button><button class="btn btn-primary" id="save-pay-btn">Record ✅</button></div>
     </div>`)
-  document.getElementById('mc')?.addEventListener('click',closeModal)
-  document.getElementById('mc2')?.addEventListener('click',closeModal)
-  document.getElementById('save-pay-btn')?.addEventListener('click',()=>{
-    const amt=parseFloat(document.getElementById('pay-amt').value)
-    if(!amt||amt<=0) return
-    loan.payments.push({id:uuid(),amount:amt,date:document.getElementById('pay-date').value,note:document.getElementById('pay-note').value.trim()||'Payment'})
-    saveData();closeModal();render()
-  })
-}
-
-// ── Rule wizard ───────────────────────────────────────────────────────────────
-
-function applyRule(rule) {
-  const salary = state.data.profile.salaryNet
-  if (!salary) { openSalaryModal(); return }
-  const loc = (state.data.profile.location || '').toLowerCase()
-  const isUK = ['london','manchester','edinburgh','bristol','birmingham','dublin'].some(c => loc.includes(c))
-  const isEU = ['paris','amsterdam','berlin'].some(c => loc.includes(c))
-
-  const RULES = {
-    '503020': isUK
-      ? { housing:.37, food:.07, transport:.05, utilities:.00, health:.00, shopping:.06, entertainment:.05, subscriptions:.04, savings:.20, education:.03, other:.13 }
-      : isEU
-      ? { housing:.32, food:.08, transport:.05, utilities:.02, health:.02, shopping:.07, entertainment:.06, subscriptions:.04, savings:.20, education:.04, other:.10 }
-      : { housing:.25, food:.10, transport:.05, utilities:.05, health:.05, shopping:.08, entertainment:.07, subscriptions:.05, savings:.20, education:.05, other:.05 },
-    '702010': isUK
-      ? { housing:.38, food:.08, transport:.06, utilities:.00, health:.00, shopping:.08, entertainment:.06, subscriptions:.04, savings:.20, education:.03, other:.07 }
-      : { housing:.28, food:.12, transport:.08, utilities:.06, health:.06, shopping:.08, entertainment:.06, subscriptions:.04, savings:.20, education:.02, other:.00 },
-    '601030': isUK
-      ? { housing:.32, food:.07, transport:.05, utilities:.00, health:.00, shopping:.04, entertainment:.04, subscriptions:.03, savings:.30, education:.05, other:.10 }
-      : { housing:.22, food:.10, transport:.07, utilities:.05, health:.06, shopping:.05, entertainment:.05, subscriptions:.03, savings:.30, education:.05, other:.02 },
+  document.getElementById('mc')?.addEventListener('click', closeModal)
+  document.getElementById('mc2')?.addEventListener('click', closeModal)
+  if (isCross) {
+    document.getElementById('pay-sent')?.addEventListener('input', e => {
+      const gbp = parseFloat(e.target.value)||0
+      const eur = gbp * rate
+      const preview = document.getElementById('conversion-preview')
+      if (preview) preview.textContent = `= ${c(eur, lCur)} received`
+    })
   }
-  const allocation = RULES[rule]
-  if (!allocation) return
-  state.data.categories.forEach(cat => {
-    if (allocation[cat.id] !== undefined) cat.budget = Math.round(salary * allocation[cat.id])
+  document.getElementById('save-pay-btn')?.addEventListener('click', () => {
+    const sentAmt = parseFloat(document.getElementById('pay-sent').value)
+    if (!sentAmt || sentAmt <= 0) return
+    const receivedAmt = isCross ? sentAmt * rate : sentAmt
+    const payment = {
+      id: uuid(),
+      amount: receivedAmt,      // amount in loan currency (reduces balance)
+      sentAmount: isCross ? sentAmt : null,  // amount in profile currency (what was sent)
+      date: document.getElementById('pay-date').value,
+      note: document.getElementById('pay-note').value.trim() || 'Payment',
+      rate: isCross ? rate : null,
+    }
+    if (!loan.payments) loan.payments = []
+    loan.payments.push(payment)
+    saveData(); closeModal(); render()
   })
-  saveData(); render()
 }
 
-// ── Toast notifications ───────────────────────────────────────────────────────
+// ── Toast ─────────────────────────────────────────────────────────────────────
 
-function showToast(message, type = 'info') {
+function showToast(message, type='info') {
   document.getElementById('toast')?.remove()
-  const colors = { info: '#1e1e3c', success: '#065f46', error: '#7f1d1d', loading: '#1e1e3c' }
-  const icons  = { info: 'ℹ️', success: '✅', error: '❌', loading: '⏳' }
+  const colors = {info:'#1a0f2e',success:'#065f46',error:'#7f1d1d',loading:'#1a0f2e'}
+  const icons  = {info:'ℹ️',success:'✅',error:'❌',loading:'⏳'}
   const toast = document.createElement('div')
   toast.id = 'toast'
   toast.innerHTML = `<span style="font-size:16px">${icons[type]||icons.info}</span><span>${message}</span>`
   Object.assign(toast.style, {
-    position: 'fixed', bottom: '28px', left: '50%', transform: 'translateX(-50%)',
-    background: colors[type] || colors.info, color: '#fff',
-    padding: '12px 22px', borderRadius: '12px', fontSize: '14px', fontWeight: '500',
-    display: 'flex', alignItems: 'center', gap: '10px',
-    boxShadow: '0 8px 32px rgba(0,0,0,0.25)', zIndex: '9999',
-    animation: 'fadeInUp 0.2s ease', whiteSpace: 'nowrap',
+    position:'fixed',bottom:'28px',left:'50%',transform:'translateX(-50%)',
+    background:colors[type]||colors.info,color:'#fff',
+    padding:'12px 22px',borderRadius:'14px',fontSize:'14px',fontWeight:'600',
+    display:'flex',alignItems:'center',gap:'10px',
+    boxShadow:'0 8px 32px rgba(0,0,0,0.25)',zIndex:'9999',
+    animation:'fadeInUp 0.2s ease',whiteSpace:'nowrap',
   })
   if (!document.getElementById('toast-style')) {
     const s = document.createElement('style')
     s.id = 'toast-style'
-    s.textContent = `@keyframes fadeInUp { from { opacity:0; transform:translateX(-50%) translateY(10px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }`
+    s.textContent = `@keyframes fadeInUp { from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)} }`
     document.head.appendChild(s)
   }
   document.body.appendChild(toast)
@@ -1230,33 +1184,24 @@ function showToast(message, type = 'info') {
 
 async function handleBackup() {
   const btn = document.getElementById('backup-btn')
-  if (btn) { btn.disabled = true; btn.querySelector('#backup-label').textContent = 'Backing up…'; btn.querySelector('#backup-icon').textContent = '⏳' }
+  if (btn) { btn.disabled=true; btn.querySelector('#backup-label').textContent='Backing up…'; btn.querySelector('#backup-icon').textContent='⏳' }
   showToast('Saving to GitHub…', 'loading')
   try {
     const result = await window.budget.gitBackup()
     document.getElementById('toast')?.remove()
     if (result.ok) {
       showToast(result.message, 'success')
-      if (btn) {
-        btn.disabled = false
-        btn.querySelector('#backup-icon').textContent = '☁️'
-        btn.querySelector('#backup-label').textContent = 'Back up now'
-        document.getElementById('backup-status').textContent = 'Last: just now'
-      }
+      if (btn) { btn.disabled=false; btn.querySelector('#backup-icon').textContent='☁️'; btn.querySelector('#backup-label').textContent='Back up now'; document.getElementById('backup-status').textContent='Last: just now' }
     } else {
       showToast(result.error, 'error')
-      if (btn) { btn.disabled = false; btn.querySelector('#backup-icon').textContent = '☁️'; btn.querySelector('#backup-label').textContent = 'Back up now' }
+      if (btn) { btn.disabled=false; btn.querySelector('#backup-icon').textContent='☁️'; btn.querySelector('#backup-label').textContent='Back up now' }
     }
-  } catch (e) {
+  } catch(e) {
     document.getElementById('toast')?.remove()
-    showToast('Backup failed: ' + e.message, 'error')
-    if (btn) { btn.disabled = false; btn.querySelector('#backup-icon').textContent = '☁️'; btn.querySelector('#backup-label').textContent = 'Back up now' }
+    showToast('Backup failed: '+e.message, 'error')
+    if (btn) { btn.disabled=false; btn.querySelector('#backup-icon').textContent='☁️'; btn.querySelector('#backup-label').textContent='Back up now' }
   }
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function debounce(fn, ms) { let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms) } }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
@@ -1265,6 +1210,8 @@ async function init() {
   if (saved) {
     const merged = defaultData()
     if (saved.profile) Object.assign(merged.profile, saved.profile)
+    // Ensure gbpToEurRate exists
+    if (!merged.profile.gbpToEurRate) merged.profile.gbpToEurRate = 1.17
     if (saved.categories) {
       merged.categories = saved.categories.map(sc => {
         const def = merged.categories.find(c => c.id === sc.id)
@@ -1273,28 +1220,28 @@ async function init() {
       const missing = defaultData().categories.filter(dc => !merged.categories.find(c => c.id === dc.id))
       merged.categories = [...merged.categories, ...missing]
     }
-    if (saved.transactions) merged.transactions = saved.transactions
-    if (saved.goals)        merged.goals = saved.goals
-    if (saved.loans)        merged.loans = saved.loans
+    // Migrate old transactions data (ignore it, we don't use it anymore)
+    if (saved.monthlyBudgets) merged.monthlyBudgets = saved.monthlyBudgets
+    if (saved.goals)          merged.goals           = saved.goals
+    if (saved.loans)          merged.loans           = saved.loans
     state.data = merged
   }
-  state.txFilter.month = getCurrentMonthKey()
-  state.viewMonth = getCurrentMonthKey()
 
-  // Nav listeners — attached once only
+  state.planMonth = getCurrentMonthKey()
+
+  // Nav — once
   document.querySelectorAll('.nav-item').forEach(el => {
     el.addEventListener('click', () => navigate(el.dataset.view))
   })
 
-  // Backup button — lives in sidebar, attached once
+  // Backup button — once
   document.getElementById('backup-btn')?.addEventListener('click', handleBackup)
-
-  // Show last backup time on load
   window.budget.gitStatus().then(s => {
-    if (s.ok && s.lastBackup) {
-      document.getElementById('backup-status').textContent = 'Last: ' + s.lastBackup
-    }
-  }).catch(() => {})
+    if (s.ok && s.lastBackup) document.getElementById('backup-status').textContent = 'Last: '+s.lastBackup
+  }).catch(()=>{})
+
+  // Settings icon in sidebar top (click logo to open salary settings)
+  document.getElementById('logo')?.addEventListener('click', openSalaryModal)
 
   render()
 }
