@@ -13,7 +13,7 @@
       "name": "Housing",
       "icon": "🏠",
       "color": "#6366f1",
-      "budget": 900,
+      "budget": 0,
       "essential": true
     },
     {
@@ -45,7 +45,7 @@
       "name": "Utilities",
       "icon": "⚡",
       "color": "#f97316",
-      "budget": 80,
+      "budget": 200,
       "essential": true
     },
     {
@@ -53,7 +53,7 @@
       "name": "Shopping",
       "icon": "🛍️",
       "color": "#ec4899",
-      "budget": 0,
+      "budget": 100,
       "essential": false
     },
     {
@@ -61,7 +61,7 @@
       "name": "Entertainment",
       "icon": "🎬",
       "color": "#8b5cf6",
-      "budget": 180,
+      "budget": 0,
       "essential": false
     },
     {
@@ -85,7 +85,7 @@
       "name": "Savings",
       "icon": "🏦",
       "color": "#10b981",
-      "budget": 300,
+      "budget": 0,
       "essential": true
     },
     {
@@ -97,7 +97,63 @@
       "essential": false
     }
   ],
-  "monthlyBudgets": [],
+  "monthlyBudgets": [
+    {
+      "id": "4cfb1086-b493-4337-b8ce-b2577b58dfa8",
+      "month": "2026-05",
+      "income": 1770,
+      "notes": "",
+      "allocations": {
+        "housing": 0,
+        "food": 150,
+        "transport": 90,
+        "health": 0,
+        "utilities": 0,
+        "shopping": 150,
+        "entertainment": 0,
+        "subscriptions": 480,
+        "education": 0,
+        "savings": 0,
+        "other": 0
+      },
+      "goalOverrides": {
+        "ff76131b-af22-4da2-b8f5-0229c702da74": 160,
+        "4921a738-b493-47fb-937b-1d8a75636e76": 0,
+        "9a934b89-fcab-4908-94a6-21ec6b008720": 0
+      },
+      "debtOverrides": {
+        "0b099fe3-1c11-49fc-b55d-493e418b17d3": 730
+      },
+      "savedAt": "2026-06-06T19:19:26.447Z"
+    },
+    {
+      "id": "318b3afe-983f-4492-9d63-81c8e3527cd3",
+      "month": "2026-06",
+      "income": 2999,
+      "notes": "",
+      "allocations": {
+        "housing": 0,
+        "food": 200,
+        "transport": 100,
+        "health": 0,
+        "utilities": 200,
+        "shopping": 100,
+        "entertainment": 0,
+        "subscriptions": 16,
+        "education": 0,
+        "savings": 0,
+        "other": 0
+      },
+      "goalOverrides": {
+        "4921a738-b493-47fb-937b-1d8a75636e76": 250,
+        "ff76131b-af22-4da2-b8f5-0229c702da74": 250
+      },
+      "debtOverrides": {
+        "0b099fe3-1c11-49fc-b55d-493e418b17d3": 500
+      },
+      "savedAt": "2026-06-06T19:17:55.415Z"
+    }
+  ],
   "goals": [
     {
       "id": "ff76131b-af22-4da2-b8f5-0229c702da74",
