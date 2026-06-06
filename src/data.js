@@ -16,10 +16,11 @@ const DEFAULT_CATEGORIES = [
 
 function defaultData() {
   return {
-    profile: { name: '', currency: '€', salaryNet: 0, updatedAt: null },
+    profile: { name: '', currency: '£', salaryNet: 0, location: 'London', updatedAt: null },
     categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
     transactions: [],
     goals: [],
+    loans: [],
   }
 }
 
