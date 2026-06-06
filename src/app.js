@@ -756,11 +756,10 @@ function attachDynamicListeners() {
     btn.addEventListener('click', () => applyRule(btn.dataset.rule))
   })
   document.querySelectorAll('.cbr-input').forEach(input => {
-    input.addEventListener('input', debounce(e => {
-      if (!document.contains(e.target)) return
+    input.addEventListener('change', e => {
       const cat = state.data.categories.find(c => c.id === e.target.dataset.cat)
       if (cat) { cat.budget = parseFloat(e.target.value) || 0; saveData(); render() }
-    }, 500))
+    })
   })
   document.querySelectorAll('[data-edit-cat]').forEach(el => el.addEventListener('click', () => openCategoryModal(el.dataset.editCat)))
   document.querySelectorAll('[data-del-cat]').forEach(btn => {
@@ -778,7 +777,16 @@ function attachDynamicListeners() {
   // Transactions
   document.getElementById('qa-submit')?.addEventListener('click', addQuickTransaction)
   document.getElementById('qa-amount')?.addEventListener('keydown', e => { if(e.key==='Enter') addQuickTransaction() })
-  document.getElementById('tx-search')?.addEventListener('input', debounce(e => { state.txFilter.search = e.target.value; render() }, 300))
+  document.getElementById('tx-search')?.addEventListener('input', debounce(e => {
+    if (!document.contains(e.target)) return
+    const val = e.target.value
+    state.txFilter.search = val
+    render()
+    requestAnimationFrame(() => {
+      const el = document.getElementById('tx-search')
+      if (el) { el.focus(); el.setSelectionRange(val.length, val.length) }
+    })
+  }, 350))
   document.getElementById('tx-cat-filter')?.addEventListener('change', e => { state.txFilter.category = e.target.value; render() })
   document.getElementById('tx-month-filter')?.addEventListener('change', e => { state.txFilter.month = e.target.value; render() })
   document.querySelectorAll('[data-tx-del]').forEach(btn => {
