@@ -220,7 +220,6 @@ function renderDashboard() {
     <div class="grid-col-5-7 mb20">
       <div class="card">
         <div class="card-title">Spending by Category — ${monthLabel(cur)}</div>
-        <canvas id="donut-chart" style="width:160px;height:160px;display:block;margin:8px auto;"></canvas>
         <div class="cat-spend-list">
           ${catSpendsWithBudget.map(c => {
             const pct = c.budget > 0 ? Math.min(100, Math.round(c.spent / c.budget * 100)) : 0
@@ -845,11 +844,6 @@ function attachDynamicListeners() {
           { data: last6.map(m=>spendByMonth[m]||0), color: '#6366f1' },
           { data: last6.map(()=>totalBudget), color: '#10b98144' },
         ])
-      }
-      const donutCanvas = document.getElementById('donut-chart')
-      if (donutCanvas) {
-        const spendCur2 = getSpendingByCategory(state.data.transactions, state.viewMonth)
-        drawDonutChart(donutCanvas, state.data.categories.filter(c=>spendCur2[c.id]>0).map(c=>({value:spendCur2[c.id],color:c.color})))
       }
       const healthCanvas = document.getElementById('health-ring')
       if (healthCanvas) {
