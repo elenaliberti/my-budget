@@ -92,24 +92,45 @@ function getMonthBudget(data, monthKey) {
 
 function getOrCreateMonthBudget(data, monthKey) {
   const existing = getMonthBudget(data, monthKey)
-  if (existing) return JSON.parse(JSON.stringify(existing))
-  // Create draft from template categories
+  if (existing) {
+    const copy = JSON.parse(JSON.stringify(existing))
+    // Ensure overrides fields exist for older saved budgets
+    if (!copy.goalOverrides) copy.goalOverrides = {}
+    if (!copy.debtOverrides) copy.debtOverrides = {}
+    return copy
+  }
   const allocations = {}
   data.categories.forEach(c => { allocations[c.id] = c.budget })
   return {
-    id: null,  // null = unsaved draft
+    id: null,
     month: monthKey,
     income: data.profile.salaryNet || 0,
     notes: '',
     allocations,
+    goalOverrides: {},   // goalId → amount for this month only (overrides goal.monthlyContribution)
+    debtOverrides: {},   // loanId → amount in profile currency for this month only
     savedAt: null
   }
 }
 
 function calcMonthSummary(data, budget) {
-  const catTotal  = Object.values(budget.allocations || {}).reduce((s, v) => s + (v || 0), 0)
-  const goalTotal = data.goals.reduce((s, g) => s + (g.monthlyContribution || 0), 0)
-  const debtTotal = data.loans.reduce((s, l) => s + loanMonthlyInProfileCurrency(data, l), 0)
+  const catTotal = Object.values(budget.allocations || {}).reduce((s, v) => s + (v || 0), 0)
+
+  // Goals: use per-month override if set, otherwise fall back to goal default
+  const goalOverrides = budget.goalOverrides || {}
+  const goalTotal = data.goals.reduce((s, g) => {
+    const ov = goalOverrides[g.id]
+    return s + (ov !== undefined ? (ov || 0) : (g.monthlyContribution || 0))
+  }, 0)
+
+  // Debt: use per-month override if set, otherwise fall back to loan default
+  const debtOverrides = budget.debtOverrides || {}
+  const debtTotal = data.loans.reduce((s, l) => {
+    const ov = debtOverrides[l.id]
+    const def = loanMonthlyInProfileCurrency(data, l)
+    return s + (ov !== undefined ? (ov || 0) : def)
+  }, 0)
+
   const totalCommitted = catTotal + goalTotal + debtTotal
   const remaining = budget.income - totalCommitted
   return { catTotal, goalTotal, debtTotal, totalCommitted, remaining }

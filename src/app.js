@@ -116,6 +116,7 @@ function renderOverview() {
   const goalsPct = totalGoalTarget > 0 ? totalGoalCurrent / totalGoalTarget : 0
 
   // On-track analysis
+  const totalCommitted = catTotal + goalTotal + debtTotal
   const catPct   = income > 0 ? Math.round(catTotal  / income * 100) : 0
   const goalPct  = income > 0 ? Math.round(goalTotal  / income * 100) : 0
   const debtPct  = income > 0 ? Math.round(debtTotal  / income * 100) : 0
@@ -137,25 +138,25 @@ function renderOverview() {
         <div class="stat-icon">💰</div>
         <div class="stat-val">${cs(income, profCur())}</div>
         <div class="stat-lbl">Income This Month</div>
-        <div class="stat-delta neu">${isSaved ? '✅ Plan saved' : '⚠️ Plan not saved yet'}</div>
+        <div class="stat-delta neu">${isSaved ? '✅ Plan saved' : '📋 Draft — not saved yet'}</div>
       </div>
       <div class="stat-card sc-spent">
-        <div class="stat-icon">🏠</div>
-        <div class="stat-val">${cs(catTotal, profCur())}</div>
-        <div class="stat-lbl">Living Expenses</div>
-        <div class="stat-delta neu">${catPct}% of income</div>
+        <div class="stat-icon">📊</div>
+        <div class="stat-val">${cs(totalCommitted, profCur())}</div>
+        <div class="stat-lbl">Total Committed</div>
+        <div class="stat-delta neu">Living + goals + debt</div>
       </div>
-      <div class="stat-card sc-remain">
-        <div class="stat-icon">${remaining >= 0 ? '🎯' : '😬'}</div>
+      <div class="stat-card ${remaining >= 0 ? 'sc-remain' : 'sc-spent'}">
+        <div class="stat-icon">${remaining >= 0 ? '✅' : '⚠️'}</div>
         <div class="stat-val ${remaining < 0 ? 'text-red' : 'text-emerald'}">${cs(Math.abs(remaining), profCur())}</div>
-        <div class="stat-lbl">${remaining >= 0 ? 'Unplanned / Free' : 'Over Income'}</div>
-        <div class="stat-delta ${remaining >= 0 ? 'pos' : 'neg'}">${freePct >= 0 ? freePct + '% breathing room' : 'Cut something!'}</div>
+        <div class="stat-lbl">${remaining >= 0 ? 'Free / Unplanned' : 'Over Your Income'}</div>
+        <div class="stat-delta ${remaining >= 0 ? 'pos' : 'neg'}">${remaining >= 0 ? 'Breathing room 🎉' : 'Adjust your plan 🤏'}</div>
       </div>
       <div class="stat-card sc-savings">
         <div class="stat-icon">🐖</div>
-        <div class="stat-val text-emerald">${goalPct}%</div>
-        <div class="stat-lbl">Going to Goals</div>
-        <div class="stat-delta ${goalPct >= 20 ? 'pos' : goalPct >= 10 ? 'neu' : 'neg'}">${goalPct >= 20 ? 'Killing it! 🔥' : goalPct >= 10 ? 'Getting there 👀' : 'Room to grow 🌱'}</div>
+        <div class="stat-val ${goalPct >= 10 ? 'text-emerald' : ''}">${goalPct}%</div>
+        <div class="stat-lbl">Into Goals</div>
+        <div class="stat-delta ${goalPct >= 20 ? 'pos' : goalPct >= 10 ? 'neu' : 'neg'}">${goalPct >= 20 ? 'Killing it! 🔥' : goalPct >= 10 ? 'Solid, aim for 20%' : 'Room to grow 🌱'}</div>
       </div>
     </div>
 
@@ -371,25 +372,30 @@ function renderMonthPlan() {
       ${goals.length > 0 ? `
       <div class="plan-section plan-section-goals">
         <div class="plan-section-header">
-          <div class="psh-title">🏆 Goal Contributions <span class="psh-auto-badge">auto</span></div>
+          <div class="psh-title">🏆 Goal Contributions <span class="psh-auto-badge">editable per month</span></div>
           <div class="psh-total text-emerald">${c(goalTotal, profCur())}</div>
         </div>
         ${goals.map(g => {
-          const gCur = goalCur(g)
-          const monthlyPay = g.monthlyContribution || 0
+          const defaultContrib = g.monthlyContribution || 0
+          const govKey = (draft.goalOverrides || {})[g.id]
+          const currentVal = govKey !== undefined ? govKey : defaultContrib
+          const isOverridden = govKey !== undefined && govKey !== defaultContrib
           const remaining2 = g.target - g.current
-          const monthsLeft = monthlyPay > 0 ? Math.ceil(remaining2/monthlyPay) : null
+          const monthsAtCurrent = currentVal > 0 ? Math.ceil(remaining2/currentVal) : null
           return `
-            <div class="plan-fixed-row">
-              <div class="pfr-icon">${g.icon||'🎯'}</div>
-              <div class="pfr-info">
-                <div class="pfr-name">${g.name}</div>
-                <div class="pfr-meta">${Math.round((g.current/g.target)*100)}% saved${monthsLeft?` · ~${monthsLeft} months to go`:''}</div>
+            <div class="plan-cat-row">
+              <div class="pcr-icon">${g.icon||'🎯'}</div>
+              <div class="pcr-info">
+                <div class="pcr-name">${g.name}</div>
+                <div class="pcr-pct">${Math.round((g.current/g.target)*100)}% saved${monthsAtCurrent?' · ~'+monthsAtCurrent+' months left':''}${isOverridden?' · <span style="color:var(--amber);font-weight:700">custom this month</span> (default '+c(defaultContrib,profCur())+')':' · default: '+c(defaultContrib,profCur())}</div>
               </div>
-              <div class="pfr-amount text-emerald">${c(monthlyPay, profCur())}<span class="pfr-freq">/mo</span></div>
+              <div class="pcr-input-wrap">
+                <span class="pcr-currency">${profCur()}</span>
+                <input type="number" class="plan-cat-input plan-goal-input" data-goal="${g.id}" value="${currentVal || ''}" placeholder="0" min="0" step="10">
+              </div>
             </div>`
         }).join('')}
-        <div class="plan-section-note">💡 Change monthly contributions in the <a href="#" id="go-goals-link">Goals</a> page</div>
+        <div class="plan-section-note">💡 Set to 0 to skip this goal for the month. Changes here only affect ${monthLabel(month)}.</div>
       </div>` : `
       <div class="plan-section-empty" id="add-goals-prompt">
         <span>🏆 No goals set up yet —</span>
@@ -399,29 +405,35 @@ function renderMonthPlan() {
       ${loans.length > 0 ? `
       <div class="plan-section plan-section-debt">
         <div class="plan-section-header">
-          <div class="psh-title">📉 Debt Repayments <span class="psh-auto-badge">auto</span></div>
+          <div class="psh-title">📉 Debt Repayments <span class="psh-auto-badge">editable per month</span></div>
           <div class="psh-total text-red">${c(debtTotal, profCur())}</div>
         </div>
         ${loans.map(loan => {
           const lCur = loanCur(loan)
-          const payInProfile = loanMonthlyInProfileCurrency(state.data, loan)
-          const payInLoan = loan.monthlyPayment || 0
           const isCross = lCur !== profCur()
+          const defaultPayInProfile = loanMonthlyInProfileCurrency(state.data, loan)
+          const dov = (draft.debtOverrides || {})[loan.id]
+          const currentVal = dov !== undefined ? dov : defaultPayInProfile
+          const isOverridden = dov !== undefined && Math.abs(dov - defaultPayInProfile) > 0.01
+          const eurEquiv = isCross && currentVal ? convertPayment(state.data, currentVal, profCur(), lCur) : null
           return `
-            <div class="plan-fixed-row">
-              <div class="pfr-icon">📉</div>
-              <div class="pfr-info">
-                <div class="pfr-name">${loan.name}</div>
-                <div class="pfr-meta">${loan.interestRate > 0 ? loan.interestRate + '% interest' : '0% — interest free ✨'}
-                  ${isCross ? ` · at ${state.data.profile.gbpToEurRate} rate` : ''}</div>
+            <div class="plan-cat-row">
+              <div class="pcr-icon">📉</div>
+              <div class="pcr-info">
+                <div class="pcr-name">${loan.name}${lCur !== profCur() ? ' <span class="cur-badge">'+lCur+'</span>' : ''}</div>
+                <div class="pcr-pct">
+                  ${loan.interestRate > 0 ? loan.interestRate + '% interest' : '0% interest free ✨'}
+                  ${isCross && eurEquiv ? ` · → ${c(eurEquiv, lCur)} received` : ''}
+                  ${isOverridden ? ' · <span style="color:var(--amber);font-weight:700">custom this month</span> (default '+c(defaultPayInProfile,profCur())+')' : ' · default: '+c(defaultPayInProfile,profCur())}
+                </div>
               </div>
-              <div class="pfr-amount text-red">
-                ${c(payInProfile, profCur())}<span class="pfr-freq">/mo</span>
-                ${isCross ? `<div class="pfr-convert">→ ${c(payInLoan, lCur)} received</div>` : ''}
+              <div class="pcr-input-wrap">
+                <span class="pcr-currency">${profCur()}</span>
+                <input type="number" class="plan-cat-input plan-debt-input" data-loan="${loan.id}" value="${currentVal || ''}" placeholder="0" min="0" step="10">
               </div>
             </div>`
         }).join('')}
-        <div class="plan-section-note">💡 Change monthly payments in the <a href="#" id="go-loans-link">Debt Tracker</a></div>
+        <div class="plan-section-note">💡 Pay extra this month? Increase the amount. Set to 0 to skip. Only affects ${monthLabel(month)}.</div>
       </div>` : ''}
 
       <div class="plan-summary-card ${over ? 'over' : remaining < income * 0.05 ? 'tight' : 'good'}">
@@ -678,12 +690,14 @@ function attachDynamicListeners() {
     }
   })
 
-  // Category inputs — update draft on change (blur)
+  // Category inputs
   document.querySelectorAll('.plan-cat-input').forEach(input => {
     input.addEventListener('change', e => {
-      if (!document.contains(e.target)) return
-      if (!state._draftBudget) return
-      state._draftBudget.allocations[e.target.dataset.cat] = parseFloat(e.target.value) || 0
+      if (!document.contains(e.target) || !state._draftBudget) return
+      const val = parseFloat(e.target.value) || 0
+      if (e.target.dataset.cat)  { state._draftBudget.allocations[e.target.dataset.cat] = val }
+      if (e.target.dataset.goal) { if (!state._draftBudget.goalOverrides) state._draftBudget.goalOverrides = {}; state._draftBudget.goalOverrides[e.target.dataset.goal] = val }
+      if (e.target.dataset.loan) { if (!state._draftBudget.debtOverrides) state._draftBudget.debtOverrides = {}; state._draftBudget.debtOverrides[e.target.dataset.loan] = val }
       updatePlanSummary()
     })
   })
