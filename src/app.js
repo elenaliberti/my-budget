@@ -1206,6 +1206,62 @@ function applyRule(rule) {
   saveData(); render()
 }
 
+// ── Toast notifications ───────────────────────────────────────────────────────
+
+function showToast(message, type = 'info') {
+  document.getElementById('toast')?.remove()
+  const colors = { info: '#1e1e3c', success: '#065f46', error: '#7f1d1d', loading: '#1e1e3c' }
+  const icons  = { info: 'ℹ️', success: '✅', error: '❌', loading: '⏳' }
+  const toast = document.createElement('div')
+  toast.id = 'toast'
+  toast.innerHTML = `<span style="font-size:16px">${icons[type]||icons.info}</span><span>${message}</span>`
+  Object.assign(toast.style, {
+    position: 'fixed', bottom: '28px', left: '50%', transform: 'translateX(-50%)',
+    background: colors[type] || colors.info, color: '#fff',
+    padding: '12px 22px', borderRadius: '12px', fontSize: '14px', fontWeight: '500',
+    display: 'flex', alignItems: 'center', gap: '10px',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.25)', zIndex: '9999',
+    animation: 'fadeInUp 0.2s ease', whiteSpace: 'nowrap',
+  })
+  if (!document.getElementById('toast-style')) {
+    const s = document.createElement('style')
+    s.id = 'toast-style'
+    s.textContent = `@keyframes fadeInUp { from { opacity:0; transform:translateX(-50%) translateY(10px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }`
+    document.head.appendChild(s)
+  }
+  document.body.appendChild(toast)
+  if (type !== 'loading') setTimeout(() => toast.remove(), 4000)
+  return toast
+}
+
+// ── GitHub backup ─────────────────────────────────────────────────────────────
+
+async function handleBackup() {
+  const btn = document.getElementById('backup-btn')
+  if (btn) { btn.disabled = true; btn.querySelector('#backup-label').textContent = 'Backing up…'; btn.querySelector('#backup-icon').textContent = '⏳' }
+  showToast('Saving to GitHub…', 'loading')
+  try {
+    const result = await window.budget.gitBackup()
+    document.getElementById('toast')?.remove()
+    if (result.ok) {
+      showToast(result.message, 'success')
+      if (btn) {
+        btn.disabled = false
+        btn.querySelector('#backup-icon').textContent = '☁️'
+        btn.querySelector('#backup-label').textContent = 'Back up now'
+        document.getElementById('backup-status').textContent = 'Last: just now'
+      }
+    } else {
+      showToast(result.error, 'error')
+      if (btn) { btn.disabled = false; btn.querySelector('#backup-icon').textContent = '☁️'; btn.querySelector('#backup-label').textContent = 'Back up now' }
+    }
+  } catch (e) {
+    document.getElementById('toast')?.remove()
+    showToast('Backup failed: ' + e.message, 'error')
+    if (btn) { btn.disabled = false; btn.querySelector('#backup-icon').textContent = '☁️'; btn.querySelector('#backup-label').textContent = 'Back up now' }
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function debounce(fn, ms) { let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms) } }
@@ -1239,40 +1295,14 @@ async function init() {
   })
 
   // Backup button — lives in sidebar, attached once
-  const backupBtn   = document.getElementById('backup-btn')
-  const backupIcon  = document.getElementById('backup-icon')
-  const backupLabel = document.getElementById('backup-label')
-  const backupStatus = document.getElementById('backup-status')
+  document.getElementById('backup-btn')?.addEventListener('click', handleBackup)
 
-  backupBtn?.addEventListener('click', async () => {
-    backupBtn.disabled = true
-    backupIcon.textContent = '⏳'
-    backupLabel.textContent = 'Backing up…'
-    backupStatus.textContent = ''
-
-    const result = await window.budget.backup()
-
-    backupBtn.disabled = false
-    if (result.ok) {
-      backupIcon.textContent = '✅'
-      backupLabel.textContent = 'Backed up!'
-      backupStatus.textContent = result.noChanges ? 'No changes since last backup' : 'Pushed to GitHub'
-      setTimeout(() => {
-        backupIcon.textContent = '☁️'
-        backupLabel.textContent = 'Back up now'
-        backupStatus.textContent = 'Last: ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-      }, 3000)
-    } else {
-      backupIcon.textContent = '❌'
-      backupLabel.textContent = 'Backup failed'
-      backupStatus.textContent = 'Check internet connection'
-      setTimeout(() => {
-        backupIcon.textContent = '☁️'
-        backupLabel.textContent = 'Back up now'
-        backupStatus.textContent = ''
-      }, 4000)
+  // Show last backup time on load
+  window.budget.gitStatus().then(s => {
+    if (s.ok && s.lastBackup) {
+      document.getElementById('backup-status').textContent = 'Last: ' + s.lastBackup
     }
-  })
+  }).catch(() => {})
 
   render()
 }
