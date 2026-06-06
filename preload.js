@@ -5,4 +5,5 @@ contextBridge.exposeInMainWorld('budget', {
   save:         (data)   => ipcRenderer.invoke('data:save', data),
   openLocation: ()       => ipcRenderer.invoke('data:open-location'),
   exportPath:   ()       => ipcRenderer.invoke('data:export-path'),
+  backup:       ()       => ipcRenderer.invoke('git:backup'),
 })

@@ -85,6 +85,11 @@ html, body { height: 100%; background: var(--sidebar-bg); font-family: var(--fon
 .hm-label { font-size: 10px; color: var(--sidebar-text); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
 .hm-score { font-size: 15px; font-weight: 700; color: var(--emerald); }
 
+.sidebar-backup-btn { -webkit-app-region: no-drag; margin-top: 12px; width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; color: #94a3b8; font-size: 12px; font-weight: 600; cursor: pointer; font-family: var(--font); transition: all 0.15s; }
+.sidebar-backup-btn:hover { background: rgba(16,185,129,0.15); border-color: rgba(16,185,129,0.3); color: #6ee7b7; }
+.sidebar-backup-btn:disabled { opacity: 0.5; cursor: default; }
+.backup-status { font-size: 10px; color: #64748b; margin-top: 6px; min-height: 14px; text-align: center; }
+
 /* ── Main ────────────────────────────────────────────────── */
 #main {
   flex: 1; background: var(--bg); overflow: hidden;

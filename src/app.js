@@ -1238,6 +1238,42 @@ async function init() {
     el.addEventListener('click', () => navigate(el.dataset.view))
   })
 
+  // Backup button — lives in sidebar, attached once
+  const backupBtn   = document.getElementById('backup-btn')
+  const backupIcon  = document.getElementById('backup-icon')
+  const backupLabel = document.getElementById('backup-label')
+  const backupStatus = document.getElementById('backup-status')
+
+  backupBtn?.addEventListener('click', async () => {
+    backupBtn.disabled = true
+    backupIcon.textContent = '⏳'
+    backupLabel.textContent = 'Backing up…'
+    backupStatus.textContent = ''
+
+    const result = await window.budget.backup()
+
+    backupBtn.disabled = false
+    if (result.ok) {
+      backupIcon.textContent = '✅'
+      backupLabel.textContent = 'Backed up!'
+      backupStatus.textContent = result.noChanges ? 'No changes since last backup' : 'Pushed to GitHub'
+      setTimeout(() => {
+        backupIcon.textContent = '☁️'
+        backupLabel.textContent = 'Back up now'
+        backupStatus.textContent = 'Last: ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+      }, 3000)
+    } else {
+      backupIcon.textContent = '❌'
+      backupLabel.textContent = 'Backup failed'
+      backupStatus.textContent = 'Check internet connection'
+      setTimeout(() => {
+        backupIcon.textContent = '☁️'
+        backupLabel.textContent = 'Back up now'
+        backupStatus.textContent = ''
+      }, 4000)
+    }
+  })
+
   render()
 }
 
