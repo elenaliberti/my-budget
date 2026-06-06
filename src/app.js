@@ -116,7 +116,6 @@ function renderOverview() {
   const goalsPct = totalGoalTarget > 0 ? totalGoalCurrent / totalGoalTarget : 0
 
   // On-track analysis
-  const totalCommitted = catTotal + goalTotal + debtTotal
   const catPct   = income > 0 ? Math.round(catTotal  / income * 100) : 0
   const goalPct  = income > 0 ? Math.round(goalTotal  / income * 100) : 0
   const debtPct  = income > 0 ? Math.round(debtTotal  / income * 100) : 0
