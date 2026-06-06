@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Budget</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <nav id="sidebar">
+      <div id="sidebar-top">
+        <div id="logo">
+          <span class="logo-icon">💰</span>
+          <div>
+            <div class="logo-title">My Budget</div>
+            <div class="logo-sub">Personal Finance</div>
+          </div>
+        </div>
+        <ul id="nav-list">
+          <li class="nav-item active" data-view="dashboard">
+            <span class="nav-icon">📊</span><span class="nav-label">Dashboard</span>
+          </li>
+          <li class="nav-item" data-view="budget">
+            <span class="nav-icon">🎯</span><span class="nav-label">Budget Setup</span>
+          </li>
+          <li class="nav-item" data-view="transactions">
+            <span class="nav-icon">💳</span><span class="nav-label">Transactions</span>
+          </li>
+          <li class="nav-item" data-view="forecast">
+            <span class="nav-icon">🔮</span><span class="nav-label">Forecast</span>
+          </li>
+          <li class="nav-item" data-view="goals">
+            <span class="nav-icon">🏆</span><span class="nav-label">Goals</span>
+          </li>
+        </ul>
+      </div>
+      <div id="sidebar-bottom">
+        <div id="salary-display">
+          <div class="sd-label">Monthly Net</div>
+          <div class="sd-amount" id="sidebar-salary">—</div>
+        </div>
+        <div id="health-mini">
+          <canvas id="health-mini-ring" width="36" height="36"></canvas>
+          <div>
+            <div class="hm-label">Health Score</div>
+            <div class="hm-score" id="sidebar-score">—</div>
+          </div>
+        </div>
+      </div>
+    </nav>
+    <main id="main">
+      <div id="view-container"></div>
+    </main>
+  </div>
+  <div id="modal-root"></div>
+  <script src="data.js"></script>
+  <script src="charts.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
