@@ -1,0 +1,179 @@
+{
+  "profile": {
+    "name": "PhD",
+    "currency": "£",
+    "salaryNet": 2250,
+    "location": "London",
+    "gbpToEurRate": 1.17,
+    "updatedAt": "2026-06-06T11:19:16.721Z"
+  },
+  "categories": [
+    {
+      "id": "housing",
+      "name": "Housing",
+      "icon": "🏠",
+      "color": "#6366f1",
+      "budget": 900,
+      "essential": true
+    },
+    {
+      "id": "food",
+      "name": "Food & Dining",
+      "icon": "🍽️",
+      "color": "#f59e0b",
+      "budget": 200,
+      "essential": true
+    },
+    {
+      "id": "transport",
+      "name": "Transport",
+      "icon": "🚌",
+      "color": "#3b82f6",
+      "budget": 100,
+      "essential": true
+    },
+    {
+      "id": "health",
+      "name": "Health",
+      "icon": "💊",
+      "color": "#10b981",
+      "budget": 0,
+      "essential": true
+    },
+    {
+      "id": "utilities",
+      "name": "Utilities",
+      "icon": "⚡",
+      "color": "#f97316",
+      "budget": 80,
+      "essential": true
+    },
+    {
+      "id": "shopping",
+      "name": "Shopping",
+      "icon": "🛍️",
+      "color": "#ec4899",
+      "budget": 0,
+      "essential": false
+    },
+    {
+      "id": "entertainment",
+      "name": "Entertainment",
+      "icon": "🎬",
+      "color": "#8b5cf6",
+      "budget": 180,
+      "essential": false
+    },
+    {
+      "id": "subscriptions",
+      "name": "Subscriptions",
+      "icon": "📱",
+      "color": "#14b8a6",
+      "budget": 16,
+      "essential": false
+    },
+    {
+      "id": "education",
+      "name": "Education",
+      "icon": "📚",
+      "color": "#06b6d4",
+      "budget": 0,
+      "essential": false
+    },
+    {
+      "id": "savings",
+      "name": "Savings",
+      "icon": "🏦",
+      "color": "#10b981",
+      "budget": 300,
+      "essential": true
+    },
+    {
+      "id": "other",
+      "name": "Other",
+      "icon": "📦",
+      "color": "#6b7280",
+      "budget": 0,
+      "essential": false
+    }
+  ],
+  "monthlyBudgets": [],
+  "goals": [
+    {
+      "id": "ff76131b-af22-4da2-b8f5-0229c702da74",
+      "name": "Saving account",
+      "target": 10000,
+      "current": 160,
+      "monthlyContribution": 150,
+      "deadline": null,
+      "icon": "🎯",
+      "color": "#10b981",
+      "currency": "£"
+    },
+    {
+      "id": "4921a738-b493-47fb-937b-1d8a75636e76",
+      "name": "China travel",
+      "target": 4000,
+      "current": 0,
+      "monthlyContribution": 150,
+      "deadline": null,
+      "icon": "🌍",
+      "color": "#10b981",
+      "currency": "£"
+    },
+    {
+      "id": "9a934b89-fcab-4908-94a6-21ec6b008720",
+      "name": "Visa insurance cost",
+      "target": 4050,
+      "current": 0,
+      "monthlyContribution": 1350,
+      "deadline": "2026-09-01",
+      "icon": "🎓",
+      "color": "#10b981",
+      "currency": "£"
+    }
+  ],
+  "loans": [
+    {
+      "id": "0b099fe3-1c11-49fc-b55d-493e418b17d3",
+      "name": "Nonno Student Loan",
+      "totalDebt": 50000,
+      "monthlyPayment": 400,
+      "interestRate": 0,
+      "startDate": "2025-10-31",
+      "currency": "€",
+      "payments": [
+        {
+          "id": "f4efdb76-0e35-44e0-a060-f926c8fafb4c",
+          "amount": 600,
+          "date": "2025-10-31",
+          "note": "Payment"
+        },
+        {
+          "id": "e14aa9a1-0e75-4dec-9f96-d0baf49a6469",
+          "amount": 600,
+          "date": "2025-11-28",
+          "note": "Payment"
+        },
+        {
+          "id": "0c932f58-05cc-437e-b81c-f27bf6478a59",
+          "amount": 600,
+          "date": "2025-12-19",
+          "note": "Payment"
+        },
+        {
+          "id": "25cfbf15-3ff8-4be5-81b8-b881a15af07b",
+          "amount": 500,
+          "date": "2026-01-01",
+          "note": "Payment"
+        },
+        {
+          "id": "f79f31d7-874d-451c-b801-f72bab03c342",
+          "amount": 850,
+          "date": "2026-05-29",
+          "note": "Payment"
+        }
+      ]
+    }
+  ]
+}
